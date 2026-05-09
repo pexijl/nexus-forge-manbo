@@ -1,0 +1,10 @@
+rootProject.name = 'nexus-forge'
+
+include 'nexus-forge-web'
+include 'nexus-forge-core'
+include 'nexus-forge-auth'
+include 'nexus-forge-user'
+include 'nexus-forge-file'
+include 'nexus-forge-ai'
+include 'nexus-forge-visual'
+include 'nexus-forge-common'
