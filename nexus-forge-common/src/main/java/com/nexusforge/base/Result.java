@@ -1,6 +1,6 @@
 package com.nexusforge.base;
 
-import com.nexusforge.constant.ResultCode;
+import com.nexusforge.enums.ResultCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -57,5 +57,13 @@ public class Result<T> {
      */
     public static <T> Result<T> fail(Integer code, String message) {
         return Result.<T>builder().code(code).message(message).build();
+    }
+
+    public static <T> Result<T> fail(ResultCode resultCode) {
+        return Result.<T>builder().code(resultCode.getCode()).message(resultCode.getMessage()).build();
+    }
+
+    public static <T> Result<T> fail(ResultCode resultCode, String msg) {
+        return Result.<T>builder().code(resultCode.getCode()).message(msg).build();
     }
 }

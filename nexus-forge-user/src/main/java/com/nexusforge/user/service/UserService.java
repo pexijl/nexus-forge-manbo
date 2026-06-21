@@ -1,5 +1,7 @@
 package com.nexusforge.user.service;
 
+import com.nexusforge.enums.ResultCode;
+import com.nexusforge.exception.BusinessException;
 import com.nexusforge.user.dto.UserRegisterDto;
 import com.nexusforge.user.entity.User;
 import com.nexusforge.user.repository.UserRepository;
@@ -18,11 +20,10 @@ public class UserService {
 
     public UserVo register(UserRegisterDto dto){
         if(userRepository.existsByUsername(dto.getUsername())){
-            // TODO: 改为自定义异常
-            throw new IllegalArgumentException("用户名已存在");
+            throw new BusinessException(ResultCode.USER_ALREADY_EXISTS);
         }
         if(userRepository.existsByEmail(dto.getEmail())){
-            throw new IllegalArgumentException("邮箱已存在");
+            throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
         }
         User user = new User();
         user.setUsername(dto.getUsername());
