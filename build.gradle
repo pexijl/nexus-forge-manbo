@@ -8,6 +8,17 @@ group = 'com.nexusforge'
 version = '0.0.1-SNAPSHOT'
 description = 'nexus-forge'
 
+repositories {
+	mavenCentral()
+}
+
+bootJar {
+	enabled = false
+}
+
+jar {
+	enabled = true
+}
 
 subprojects {
 
@@ -27,6 +38,14 @@ subprojects {
 
 	dependencyManagement {
 
+	}
+
+	bootJar {
+		enabled = false
+	}
+
+	jar {
+		enabled = true
 	}
 
 	dependencies {
