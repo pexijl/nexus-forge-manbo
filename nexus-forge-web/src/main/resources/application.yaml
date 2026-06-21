@@ -1,3 +1,9 @@
+# 通用配置文件
+
 spring:
   application:
     name: nexus-forge
+  jackson:
+    timezone: UTC # 设置时区为UTC，避免时区问题导致的时间显示错误
+  profiles:
+    active: dev  # 默认激活 dev 环境

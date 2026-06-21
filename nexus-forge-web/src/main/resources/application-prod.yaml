@@ -1,0 +1,11 @@
+# 生产配置文件
+
+spring:
+  datasource:
+    url: jdbc:postgresql://prod-host:5432/nexus-forge?serverTimezone=UTC
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate # 生产环境使用validate，确保数据库结构正确但不自动修改
