@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import type { ApiResponse, RequestConfig } from '@/types/api'
+import { setupInterceptors } from './interceptors'
 
 class HttpClient {
   private readonly instance: AxiosInstance
