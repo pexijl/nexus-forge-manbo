@@ -6,12 +6,15 @@
 </template>
 
 <script setup lang="ts">
+import { hello } from '@/api/health'
+
+
 const handleClick = () => {
-  console.log('Button clicked!');
+  hello().then(res => {
+    console.log(res)
+  })
 }
 
 </script>
 
-<style scoped>
-
-</style>
+<style scoped></style>
