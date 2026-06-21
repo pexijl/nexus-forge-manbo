@@ -8,7 +8,11 @@ const app = createApp(App);
 
 app.use(PrimeVue, {
     theme: {
-        preset: Aura
+        preset: Aura,
+        options: {
+            // 只在 <html class="dark"> 时启用暗色模式
+            darkModeSelector: '.dark'
+        }
     }
 });
 
