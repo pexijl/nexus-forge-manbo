@@ -1,6 +1,7 @@
 package com.nexusforge.user.vo;
 
 import com.nexusforge.user.entity.User;
+import com.nexusforge.user.enums.Role;
 import lombok.Data;
 
 @Data
@@ -12,7 +13,7 @@ public class UserVo {
     private String avatarUrl;
     private String phone;
     private Integer status;
-    private String role;
+    private Role role;
 
     public static UserVo of(User user) {
         UserVo vo = new UserVo();

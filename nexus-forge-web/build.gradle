@@ -17,6 +17,7 @@ bootJar {
 dependencies {
 
     implementation project(':nexus-forge-common')
+    implementation project(':nexus-forge-user')
 
 
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'

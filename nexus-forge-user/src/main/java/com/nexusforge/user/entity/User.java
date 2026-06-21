@@ -1,17 +1,26 @@
 package com.nexusforge.user.entity;
 
+import com.nexusforge.base.BaseEntity;
+import com.nexusforge.user.enums.Role;
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 
 import java.time.OffsetDateTime;
 
 /**
  * 用户实体类
  */
-@Data
+@Getter
+@Setter
+@ToString(callSuper = true)
+@EqualsAndHashCode(callSuper = true)
 @Entity
 @Table(name = "users")
-public class User {
+public class User extends BaseEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -36,15 +45,10 @@ public class User {
     @Column(nullable = false)
     private Integer status = 1;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private String role;
+    private Role role = Role.USER;
 
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private OffsetDateTime createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    private OffsetDateTime updatedAt;
 }
