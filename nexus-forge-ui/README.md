@@ -1,1 +1,1 @@
-Vue 3 + TypeScript + Vite + Tailwind CSS + PrimeVue
+Vue 3 + TypeScript + Vite + Tailwind CSS + PrimeVue + SCSS
