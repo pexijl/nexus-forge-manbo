@@ -9,3 +9,10 @@ spring:
     show-sql: false
     hibernate:
       ddl-auto: validate # 生产环境使用validate，确保数据库结构正确但不自动修改
+
+
+jwt:
+  secret: ${JWT_SECRET} # JWT的签名密钥，应该保存在安全的地方
+  ttl: 7200000 # 2小时，单位为毫秒
+  header: Authorization # 请求头中存放JWT的字段名称
+  prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证

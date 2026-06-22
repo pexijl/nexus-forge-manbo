@@ -1,12 +1,13 @@
 package com.nexusforge.user.service;
 
+import com.nexusforge.dto.RegisterRequest;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.BusinessException;
-import com.nexusforge.user.dto.UserRegisterDto;
 import com.nexusforge.user.entity.User;
 import com.nexusforge.user.repository.UserRepository;
 import com.nexusforge.user.vo.UserVo;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 /**
@@ -18,18 +19,20 @@ public class UserService {
 
     private final UserRepository userRepository;
 
-    public UserVo register(UserRegisterDto dto){
-        if(userRepository.existsByUsername(dto.getUsername())){
+    private final PasswordEncoder passwordEncoder;
+
+    public UserVo register(RegisterRequest req){
+        if(userRepository.existsByUsername(req.getUsername())){
             throw new BusinessException(ResultCode.USER_ALREADY_EXISTS);
         }
-        if(userRepository.existsByEmail(dto.getEmail())){
+        if(userRepository.existsByEmail(req.getEmail())){
             throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
         }
         User user = new User();
-        user.setUsername(dto.getUsername());
-        user.setEmail(dto.getEmail());
-        // TODO: 使用 bcrypt 加密
-        user.setPassword(dto.getPassword());
+        user.setUsername(req.getUsername());
+        user.setEmail(req.getEmail());
+        String encodedPassword = passwordEncoder.encode(req.getPassword());
+        user.setPassword(encodedPassword);
         userRepository.save(user);
         return UserVo.of(user);
     }

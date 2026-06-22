@@ -1,7 +1,8 @@
 package com.nexusforge.user.entity;
 
 import com.nexusforge.base.BaseEntity;
-import com.nexusforge.user.enums.Role;
+import com.nexusforge.enums.Role;
+import com.nexusforge.enums.UserStatus;
 import jakarta.persistence.*;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -9,6 +10,8 @@ import lombok.Setter;
 import lombok.ToString;
 
 import java.time.OffsetDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 用户实体类
@@ -43,11 +46,13 @@ public class User extends BaseEntity {
     private String phone;
 
     @Column(nullable = false)
-    private Integer status = 1;
+    private UserStatus status = UserStatus.ACTIVE;
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "role")
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private Role role = Role.USER;
+    private Set<Role> roles = new HashSet<>();
 
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;

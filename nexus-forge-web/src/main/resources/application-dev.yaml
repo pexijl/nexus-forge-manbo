@@ -15,6 +15,13 @@ spring:
       ddl-auto: update # 开发环境使用update，自动更新数据库结构
     properties:
       hibernate:
-        format_sql: true # 格式化SQL语句，方便阅读
+        format_sql: false # 格式化SQL语句，方便阅读
     show-sql: true # 显示SQL语句，方便调试
     open-in-view: false # 关闭Open Session in View，避免性能问题和潜在的内存泄漏
+
+
+jwt:
+  secret: "DWXnZS9hey/ILbsbNrBSeXHjRXCOMleqG9VjWN1WJiY=" # JWT的签名密钥，应该保存在安全的地方
+  ttl: 7200000 # 2小时，单位为毫秒
+  header: Authorization # 请求头中存放JWT的字段名称
+  prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证

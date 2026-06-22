@@ -1,4 +1,4 @@
-package com.nexusforge.user.dto;
+package com.nexusforge.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -6,10 +6,10 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
- * 用户注册数据传输对象
+ * 注册请求 DTO 类，用于封装用户注册请求的数据，包括用户名、邮箱和密码
  */
 @Data
-public class UserRegisterDto {
+public class RegisterRequest {
 
     @NotBlank(message = "用户名不能为空")
     @Size(min = 3, max = 50, message = "用户名长度必须在3到50之间")

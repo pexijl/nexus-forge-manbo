@@ -15,6 +15,7 @@ public enum ResultCode {
     BAD_REQUEST(400, "请求参数错误"),
     VALIDATION_FAILED(1001, "参数校验失败"),
     UNAUTHORIZED(1002, "未登录或登录已过期"),
+    INVALID_CREDENTIALS(1003, "账号或密码错误"),
 
     // 业务错误
     USER_NOT_FOUND(2001, "用户不存在"),

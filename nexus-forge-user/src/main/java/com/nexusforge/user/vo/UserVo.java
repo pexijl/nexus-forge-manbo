@@ -1,8 +1,12 @@
 package com.nexusforge.user.vo;
 
+import com.nexusforge.enums.UserStatus;
 import com.nexusforge.user.entity.User;
-import com.nexusforge.user.enums.Role;
+import com.nexusforge.enums.Role;
 import lombok.Data;
+
+import java.util.List;
+import java.util.Set;
 
 @Data
 public class UserVo {
@@ -12,8 +16,8 @@ public class UserVo {
     private String nickname;
     private String avatarUrl;
     private String phone;
-    private Integer status;
-    private Role role;
+    private UserStatus status;
+    private List<String> roles;
 
     public static UserVo of(User user) {
         UserVo vo = new UserVo();
@@ -24,7 +28,9 @@ public class UserVo {
         vo.setAvatarUrl(user.getAvatarUrl());
         vo.setPhone(user.getPhone());
         vo.setStatus(user.getStatus());
-        vo.setRole(user.getRole());
+        vo.setRoles(user.getRoles().stream()
+                .map(Role::getAuthority)  // "ROLE_USER", "ROLE_ADMIN"
+                .toList());
         return vo;
     }
 }
