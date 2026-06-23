@@ -3,13 +3,13 @@
         <h2 class="font-bold text-2xl text-center">登录</h2>
         <div class="form-field">
             <FloatLabel>
-                <InputText id="account" v-model="account" fluid />
+                <InputText id="account" v-model="loginForm.account" fluid />
                 <label for="account">用户名或邮箱</label>
             </FloatLabel>
         </div>
         <div class="form-field">
             <FloatLabel>
-                <InputText id="password" v-model="password" type="password" fluid />
+                <InputText id="password" v-model="loginForm.password" type="password" fluid />
                 <label for="password">密码</label>
             </FloatLabel>
         </div>
@@ -23,13 +23,29 @@
 
 <script setup lang="ts">
 import router from '@/router'
+import type { LoginRequest } from '@/types/api'
+import { useAuthStore } from '@/stores/auth'
 import { ref } from 'vue'
+import { useToast } from 'primevue/usetoast'
 
-const account = ref('')
-const password = ref('')
+const toast = useToast()
+const authStore = useAuthStore()
 
-const handleLogin = () => {
-    console.log(account.value, password.value)
+const loginForm = ref<LoginRequest>({
+    account: '',
+    password: ''
+})
+
+
+const handleLogin = async () => {
+    try {
+        await authStore.login(loginForm.value)
+        toast.add({ severity: 'success', summary: '登录成功', group: 'br', life: 3000 })
+        router.push('/')
+    } catch (error) {
+        toast.add({ severity: 'error', summary: '登录失败', group: 'br', life: 3000 })
+    } finally {
+    }
 }
 const switchToRegister = () => {
     router.push({ query: { tab: 'register' } })

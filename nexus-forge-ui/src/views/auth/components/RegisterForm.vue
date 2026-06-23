@@ -1,59 +1,117 @@
 <template>
-    <div class="register-form-container">
+    <Form class="register-form-container" v-slot="$form" :initialValues :resolver="resolver" @submit="handleRegister">
         <h2 class="font-bold text-2xl text-center">注册</h2>
 
         <div class="form-field">
             <FloatLabel>
-                <InputText id="username" v-model="username" fluid />
+                <InputText name="username" id="username" v-model="registerForm.username" fluid />
                 <label for="username">用户名</label>
             </FloatLabel>
+            <Message v-if="$form.username?.invalid" severity="error" size="small" variant="simple">
+                {{ $form.username.error?.message }}
+            </Message>
         </div>
 
         <div class="form-field">
             <FloatLabel>
-                <InputText id="email" v-model="email" type="email" fluid />
+                <InputText name="email" id="email" v-model="registerForm.email" type="email" fluid />
                 <label for="email">邮箱</label>
             </FloatLabel>
+            <Message v-if="$form.email?.invalid" severity="error" size="small" variant="simple">
+                {{ $form.email.error?.message }}
+            </Message>
         </div>
 
         <div class="form-field">
             <FloatLabel>
-                <InputText id="password" v-model="password" type="password" fluid />
+                <InputText name="password" id="password" v-model="registerForm.password" type="password" fluid />
                 <label for="password">密码</label>
             </FloatLabel>
+            <Message v-if="$form.password?.invalid" severity="error" size="small" variant="simple">
+                {{ $form.password.error?.message }}
+            </Message>
         </div>
 
         <div class="form-field">
             <FloatLabel>
-                <InputText id="confirmPassword" v-model="confirmPassword" type="password" fluid />
+                <InputText name="confirmPassword" id="confirmPassword" v-model="registerForm.confirmPassword"
+                    type="password" fluid />
                 <label for="confirmPassword">确认密码</label>
             </FloatLabel>
+            <Message v-if="$form.confirmPassword?.invalid" severity="error" size="small" variant="simple">
+                {{ $form.confirmPassword.error?.message }}
+            </Message>
         </div>
 
-        <Button label="注册" @click="handleRegister" />
+        <Button type="submit" label="注册" />
 
         <p class="auth-switch">
             已有账号？
             <a @click="switchToLogin">去登录</a>
         </p>
-    </div>
+    </Form>
 </template>
 
 <script setup lang="ts">
+import { zodResolver } from '@primevue/forms/resolvers/zod';
+import { z } from 'zod'
 import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 import { ref } from 'vue'
+import { useToast } from 'primevue/usetoast'
 
-const username = ref('')
-const email = ref('')
-const password = ref('')
-const confirmPassword = ref('')
+const toast = useToast()
+const authStore = useAuthStore()
 
-const handleRegister = () => {
-    if (password.value !== confirmPassword.value) {
-        console.error('两次输入的密码不一致')
-        return
+const initialValues = ref({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: ''
+})
+
+const registerForm = ref({
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: ''
+})
+
+const schema = z.object({
+    username: z.string().min(3, { error: '用户名至少3位' }),
+    email: z.string()
+        .min(1, { error: '邮箱不能为空' })
+        .email({ error: '邮箱格式不正确' }),
+    password: z.string().min(6, { error: '密码至少6位' }),
+    confirmPassword: z.string()
+}).refine(data => data.password === data.confirmPassword, {
+    message: '两次密码不一致',
+    path: ['confirmPassword']
+})
+
+const resolver = ref(zodResolver(schema))
+
+interface FormSubmitEvent {
+    valid: boolean
+    values: Record<string, any>
+    states: Record<string, any>
+}
+
+const handleRegister = async ({ valid, values }: FormSubmitEvent) => {
+    if (valid) {
+        try {
+            await authStore.register({
+                username: registerForm.value.username,
+                email: registerForm.value.email,
+                password: registerForm.value.password,
+            })
+            toast.add({ severity: 'success', summary: '注册成功', group: 'br', life: 3000 })
+            router.push({ query: { tab: 'login' } })
+        } catch (error) {
+            toast.add({ severity: 'error', summary: '注册失败', group: 'br', life: 3000 })
+        } finally {
+        }
     }
-    console.log(username.value, email.value, password.value)
 }
 
 const switchToLogin = () => {
