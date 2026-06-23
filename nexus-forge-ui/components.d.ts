@@ -12,7 +12,10 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     Button: typeof import('primevue/button')['default']
+    FloatLabel: typeof import('primevue/floatlabel')['default']
     HelloWorld: typeof import('./src/components/HelloWorld.vue')['default']
+    InputText: typeof import('primevue/inputtext')['default']
+    ParticleCanvas: typeof import('./src/components/effects/ParticleCanvas.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
