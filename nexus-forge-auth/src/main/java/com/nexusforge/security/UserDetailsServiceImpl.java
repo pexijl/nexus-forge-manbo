@@ -11,7 +11,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -25,7 +24,7 @@ public class UserDetailsServiceImpl implements UserDetailsService {
     private final UserRepository userRepository;
 
     @Override
-    public LoginUser loadUserByUsername(String account) throws UsernameNotFoundException {
+    public LoginUser loadUserByUsername(@NonNull String account) throws UsernameNotFoundException {
         log.info("正在加载用户信息，账号: {}", account);
         User user = userRepository.findByAccount(account)
                 .orElseThrow(() -> new UsernameNotFoundException("账号不存在: " + account));

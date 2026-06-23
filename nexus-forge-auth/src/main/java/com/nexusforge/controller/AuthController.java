@@ -58,8 +58,11 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public Result<UserVo> register(@Valid @RequestBody RegisterRequest req) {
+    public Result<?> register(@Valid @RequestBody RegisterRequest req) {
         UserVo userVo = userService.register(req);
-        return Result.success(userVo);
+        if(userVo == null){
+            return Result.fail(ResultCode.REGISTRATION_FAILED);
+        }
+        return Result.success();
     }
 }

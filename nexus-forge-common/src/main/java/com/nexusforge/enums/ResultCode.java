@@ -20,7 +20,8 @@ public enum ResultCode {
     // 业务错误
     USER_NOT_FOUND(2001, "用户不存在"),
     USER_ALREADY_EXISTS(2002, "用户已存在"),
-    EMAIL_ALREADY_EXISTS(2003, "邮箱已存在");
+    EMAIL_ALREADY_EXISTS(2003, "邮箱已存在"),
+    REGISTRATION_FAILED(2004, "注册失败");
 
     private final Integer code;
     private final String message;

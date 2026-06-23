@@ -1,4 +1,5 @@
 import { apiLogin, apiRegister } from '@/api/auth'
+import { apiGetCurrentUser } from '@/api/user'
 import type { LoginRequest, RegisterRequest } from '@/types/api'
 import type { User, UserInfo } from '@/types/models/user'
 import { defineStore } from 'pinia'
@@ -9,9 +10,7 @@ export const useAuthStore = defineStore('auth', () => {
     const userInfo = ref<UserInfo | null>(null)
 
     async function register(req: RegisterRequest) {
-        await apiRegister(req).then((res) => {
-            userInfo.value = res
-        })
+        await apiRegister(req)
     }
 
     async function login(req: LoginRequest) {
@@ -21,13 +20,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function fetchUserInfo() {
-        // TODO: 调用获取用户信息的接口
+        await apiGetCurrentUser().then((res) => {
+            userInfo.value = res
+        })
     }
 
     return {
         token,
         userInfo,
         register,
-        login
+        login,
+        fetchUserInfo
     }
 })
