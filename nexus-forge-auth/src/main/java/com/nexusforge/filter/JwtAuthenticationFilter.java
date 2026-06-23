@@ -1,7 +1,7 @@
 package com.nexusforge.filter;
 
 import com.nexusforge.config.JwtProperties;
-import com.nexusforge.enums.Role;
+import com.nexusforge.security.UserPrincipal;
 import com.nexusforge.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -62,15 +64,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             // 4. 从 Claims 中提取权限（生产建议从 Redis/DB 查询，避免 Token 过大）
             // TODO: 从Redis中提取权限
-            List roles = claims.get("roles", List.class);
             @SuppressWarnings("unchecked")
-            List authorities = Collections.singletonList(roles.stream()
-                    .map(role -> new SimpleGrantedAuthority(((String) role)))  // ← 直接转换为字符串
-                    .collect(Collectors.toList()));
+            List<String> roles = (List<String>) claims.get("roles");
+            List<GrantedAuthority>  authorities = roles.stream()
+                    .map(SimpleGrantedAuthority::new)
+                    .collect(Collectors.toList());
 
             // 5. 构建 Authentication 对象并设置到 SecurityContext
+            UserPrincipal principal = new UserPrincipal(userId, username);
             UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(username, null, authorities);
+                    new UsernamePasswordAuthenticationToken(principal, null, authorities);
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(auth);
 

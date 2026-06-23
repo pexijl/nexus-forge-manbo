@@ -5,8 +5,8 @@ import com.nexusforge.user.entity.User;
 import com.nexusforge.enums.Role;
 import lombok.Data;
 
+import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Set;
 
 @Data
 public class UserVo {
@@ -18,6 +18,9 @@ public class UserVo {
     private String phone;
     private UserStatus status;
     private List<String> roles;
+    private OffsetDateTime lastLoginAt;
+    private OffsetDateTime createdAt;
+    private OffsetDateTime updatedAt;
 
     public static UserVo of(User user) {
         UserVo vo = new UserVo();
@@ -31,6 +34,9 @@ public class UserVo {
         vo.setRoles(user.getRoles().stream()
                 .map(Role::getAuthority)  // "ROLE_USER", "ROLE_ADMIN"
                 .toList());
+        vo.setLastLoginAt(user.getLastLoginAt());
+        vo.setCreatedAt(user.getCreatedAt());
+        vo.setUpdatedAt(user.getUpdatedAt());
         return vo;
     }
 }

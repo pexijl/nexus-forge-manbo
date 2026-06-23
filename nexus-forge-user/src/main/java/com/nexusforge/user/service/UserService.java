@@ -21,6 +21,12 @@ public class UserService {
 
     private final PasswordEncoder passwordEncoder;
 
+    public UserVo findUserVoById(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
+        return UserVo.of(user);
+    }
+
     public UserVo register(RegisterRequest req){
         if(userRepository.existsByUsername(req.getUsername())){
             throw new BusinessException(ResultCode.USER_ALREADY_EXISTS);

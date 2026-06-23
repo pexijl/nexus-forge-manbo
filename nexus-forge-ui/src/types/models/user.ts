@@ -28,7 +28,7 @@ export interface User {
     updatedAt: string;
 }
 
-export interface UserVo {
+export interface UserInfo {
     id: number;
     username: string;
     email: string;
