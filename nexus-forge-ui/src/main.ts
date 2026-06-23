@@ -7,11 +7,16 @@ import './styles/main.scss'
 import { MyPreset } from './themes/index.ts';
 import { createPinia } from 'pinia';
 import ToastService from 'primevue/toastservice';
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 
 const app = createApp(App);
+const pinia = createPinia()
+
+pinia.use(piniaPluginPersistedstate)
+
 // 路由集成
 app.use(router);
-app.use(createPinia())
+app.use(pinia)
 app.use(ToastService);
 
 app.use(PrimeVue, {
