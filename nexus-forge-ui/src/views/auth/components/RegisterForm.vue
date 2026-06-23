@@ -78,11 +78,9 @@ const registerForm = ref({
 })
 
 const schema = z.object({
-    username: z.string().min(3, { error: '用户名至少3位' }),
-    email: z.string()
-        .min(1, { error: '邮箱不能为空' })
-        .email({ error: '邮箱格式不正确' }),
-    password: z.string().min(6, { error: '密码至少6位' }),
+    username: z.string().min(3, { message: '用户名至少3位' }),
+    email: z.email({ message: '邮箱格式不正确' }),
+    password: z.string().min(6, { message: '密码至少6位' }),
     confirmPassword: z.string()
 }).refine(data => data.password === data.confirmPassword, {
     message: '两次密码不一致',
@@ -108,7 +106,13 @@ const handleRegister = async ({ valid, values }: FormSubmitEvent) => {
             toast.add({ severity: 'success', summary: '注册成功', group: 'br', life: 3000 })
             router.push({ query: { tab: 'login' } })
         } catch (error) {
-            toast.add({ severity: 'error', summary: '注册失败', group: 'br', life: 3000 })
+            let errMsg = '注册失败，请重试'
+            if (error instanceof Error) {
+                errMsg = error.message
+            } else if (typeof error === 'string') {
+                errMsg = error
+            }
+            toast.add({ severity: 'error', summary: '注册失败', detail: errMsg, group: 'br', life: 3000 })
         } finally {
         }
     }
