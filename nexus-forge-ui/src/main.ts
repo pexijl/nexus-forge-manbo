@@ -8,6 +8,7 @@ import { MyPreset } from './themes/index.ts';
 import { createPinia } from 'pinia';
 import ToastService from 'primevue/toastservice';
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
+import 'primeicons/primeicons.css'
 
 const app = createApp(App);
 const pinia = createPinia()
