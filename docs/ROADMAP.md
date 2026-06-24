@@ -99,11 +99,47 @@
 
 ## nexus-forge-file
 
-- [ ] 抽象 `StorageProvider`(本地 / S3 兼容 / MinIO)
-- [ ] 通用上传接口(`POST /files/upload`)
-- [ ] 分片上传 / 秒传 / 断点续传
+### 架构决策
+
+**统一使用 AWS S3 SDK 作为基础抽象** —— MinIO、阿里云 OSS、腾讯云 COS 均提供 S3 兼容接口,可通过 `endpoint` 切换实现零成本迁移。仅在需要厂商特有能力(如 OSS 图片处理回调)时再额外接入官方 SDK。
+
+- **开发**:MinIO(本地 Docker) —— S3 SDK 接入,Console Web UI(`:9001`)调试
+- **测试**:任意 S3 兼容服务 —— Ceph RGW / SeaweedFS / 自建 MinIO
+- **生产**:阿里云 OSS / 腾讯云 COS / 自选 —— 优先走 S3 兼容模式,endpoint 切换
+
+### StorageProvider SPI
+
+- [ ] 定义 `StorageProvider` 接口:`upload` / `download` / `delete` / `presignedUrl` / `exists`
+- [ ] 通过 `@ConditionalOnProperty(prefix = "nexus-forge.file", name = "provider")` 选择实现
+- [ ] 统一配置:`endpoint` / `bucket` / `access-key` / `secret-key` / `region` / `path-style`
+
+### MinIO 开发环境(本地)
+
+- [ ] Docker Compose 启动 MinIO(API `:9000` + Console `:9001`)
+- [ ] 启动脚本自动创建 bucket(`nexus-forge-dev`)
+- [ ] `MinIOStorageProvider` 实现(基于 `software.amazon.awssdk:s3`)
+- [ ] `application-dev.yaml` 完整配置示例
+- [ ] Console Web UI 调试入口文档
+
+### 测试环境(S3 兼容)
+
+- [ ] 通用 `S3CompatibleStorageProvider`(覆盖 Ceph RGW / SeaweedFS 等)
+- [ ] `application-test.yaml` 配置模板
+
+### 生产环境(阿里云 OSS / 腾讯云 COS)
+
+- [ ] 阿里云 OSS 适配:`endpoint = https://oss-cn-<region>.aliyuncs.com`
+- [ ] 腾讯云 COS 适配:`endpoint = https://cos-<region>.tencentcos.cn`
+- [ ] `application-prod.yaml` 配置模板(各 provider 切换示例)
+- [ ] 若使用厂商特有能力,再单独接入官方 SDK(图片处理 / 回调 / 视频转码)
+
+### 通用能力
+
+- [ ] `POST /files/upload` 通用上传接口(单文件 / 多文件)
+- [ ] 分片上传 / 秒传(基于文件 hash)/ 断点续传
 - [ ] 图片处理(缩略图、水印)
-- [ ] 文件访问权限与临时签名 URL
+- [ ] 文件访问权限与临时签名 URL(presigned)
+- [ ] 文件元数据落库(`FileEntity` + `FileRepository`)
 
 ## nexus-forge-ai
 
