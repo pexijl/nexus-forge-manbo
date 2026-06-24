@@ -1,9 +1,9 @@
 <template>
     <div class="app-layout-container">
-        <AppToolbar v-model:visible="visible" />
+        <AppToolbar @toggle="layoutStore.toggleSidebar" />
         <main class="main-content">
             <router-view />
-            <AppSidePanel v-model:visible="visible">
+            <AppSidePanel v-model:visible="sidebarVisible">
                 <template #header>
                     <span>自定义面板标题</span>
                 </template>
@@ -14,11 +14,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import AppToolbar from './components/AppToolbar.vue';
 import AppSidePanel from './components/AppSidePanel.vue';
+import { useLayoutStore } from '@/stores/layout.ts';
+import { storeToRefs } from 'pinia';
 
-const visible = ref(false);
+const layoutStore = useLayoutStore()
+const { sidebarVisible } = storeToRefs(layoutStore)
 </script>
 
 <style scoped lang="scss">

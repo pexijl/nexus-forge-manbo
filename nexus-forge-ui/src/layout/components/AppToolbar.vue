@@ -2,7 +2,7 @@
     <div class="app-toolbar-container">
         <!-- 左侧：Logo + 导航 -->
         <div class="toolbar-left">
-            <Button icon="pi pi-align-justify" variant="text" @click="toggleSidePanel" />
+            <Button icon="pi pi-align-justify" variant="text" @click="emit('toggle')" />
         </div>
         <!-- 右侧：操作区 -->
         <div class="toolbar-right">
@@ -11,17 +11,9 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{
-    visible: boolean
-}>()
-
 const emit = defineEmits<{
-    (e: 'update:visible', value: boolean): void
+    (e: 'toggle'): void
 }>()
-
-function toggleSidePanel() {
-    emit('update:visible', !props.visible)
-}
 </script>
 
 <style scoped lang="scss">
