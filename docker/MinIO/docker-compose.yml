@@ -13,6 +13,7 @@ services:
     volumes:
       - minio_data:/data
       - minio_config:/root/.minio
+      - ./minio.license:/root/.minio/license
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
