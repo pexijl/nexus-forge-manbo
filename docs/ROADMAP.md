@@ -20,6 +20,46 @@
 
 ---
 
+## 🔥 当前冲刺(2026-06-24 ~)
+
+> 在做完整模块清单前,先打掉这一波"高 ROI、低风险"的局部任务,目标是形成"修改个人信息 → 自动出文档"的端到端闭环。
+
+### 🟢 第 1 优先级(强烈建议先做)
+
+**主题:补齐 `/users/me` 写类接口 + 个人中心页 + 接口文档**
+
+- [ ] 后端:`PATCH /users/me`(昵称 / 头像 / 邮箱 / 手机)
+- [ ] 后端:`POST /users/me/password`(改密码,校验旧密码)
+- [ ] 后端:顺手清掉 `Result.java:40,49` 的 magic number TODO
+- [ ] 前端:`/profile` 个人中心页(展示 + 修改表单,Zod 校验)
+- [ ] 横切:接入 `springdoc-openapi`,Swagger UI 挂 `/swagger-ui.html`
+
+### 🟡 第 2 优先级(有空接着做)
+
+**主题:登录态与权限加固**
+
+- [ ] 后端:`POST /auth/refresh`(access + refresh 双 Token)
+- [ ] 后端:登出 / Token 黑名单
+- [ ] 后端:`JwtAuthenticationFilter:65` 改为从 Redis 读权限
+- [ ] 前端:axios 拦截器补充 401 / 403 → 自动跳登录
+- [ ] 前端:Vue Router `beforeEach` 路由级权限守卫(基于 `Role`)
+- [ ] 前端:主题切换按钮(明 / 暗,与 AppLayout 联动)
+
+### ⚪ 第 3 优先级(等业务明确再做)
+
+- [ ] Docker Compose 一键起 PostgreSQL + Redis
+- [ ] GitHub Actions CI(lint + test + build)
+- [ ] 单元测试起步(`UserService` / `JwtUtil` 核心用例)
+- [ ] i18n(没有海外用户前不做)
+
+### 🚫 先别碰
+
+- `nexus-forge-file` / `nexus-forge-ai` / `nexus-forge-visual` —— 业务方向不明,搭出来也是空架子
+- `nexus-forge-core` 基础设施(幂等、限流、审计) —— 缺乏业务压力,容易过度设计
+- `BaseEntity` 软删除字段 —— 取决于"账号注销"是否进入产品范围
+
+---
+
 ## nexus-forge-common
 
 - [ ] `Result.success(String, T)` 与 `Result.fail(String)` 中的 magic number(`200` / `500`)替换为 `ResultCode` 常量
