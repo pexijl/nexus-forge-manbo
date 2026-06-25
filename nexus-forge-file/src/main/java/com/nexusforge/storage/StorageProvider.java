@@ -4,6 +4,9 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 
+/**
+ * 对象存储服务提供者接口
+ */
 public interface StorageProvider {
 
     // ============ Bucket 管理 ============

@@ -20,6 +20,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * S3 存储服务提供者实现
+ * <p>支持 AWS S3、MinIO、阿里云 OSS、腾讯云 COS 等兼容 S3 协议的对象存储服务</p>
+ */
 @Component
 public class S3StorageProvider implements StorageProvider {
 

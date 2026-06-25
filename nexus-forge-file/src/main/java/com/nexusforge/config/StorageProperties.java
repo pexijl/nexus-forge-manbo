@@ -7,6 +7,11 @@ import org.springframework.context.annotation.Configuration;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * 存储配置属性类
+ * <p>用于从 application.properties 或 application.yml 中加载存储相关的配置</p>
+ * <p>支持多厂商配置：MinIO、阿里云 OSS、腾讯云 COS、AWS S3</p>
+ */
 @Data
 @Configuration
 @ConfigurationProperties(prefix = "storage")

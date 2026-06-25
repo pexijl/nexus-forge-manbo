@@ -19,6 +19,7 @@ dependencies {
     implementation project(':nexus-forge-common')
     implementation project(':nexus-forge-user')
     implementation project(':nexus-forge-auth')
+    implementation project(':nexus-forge-file')
 
 
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
