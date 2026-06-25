@@ -12,11 +12,13 @@ repositories {
 }
 
 dependencies {
-    testImplementation platform('org.junit:junit-bom:6.0.0')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-}
 
-test {
-    useJUnitPlatform()
+    implementation project(':nexus-forge-common')
+
+    implementation platform('software.amazon.awssdk:bom:2.46.16')
+    implementation("software.amazon.awssdk:s3")
+    implementation("software.amazon.awssdk:s3-transfer-manager")
+    implementation("software.amazon.awssdk:auth")
+    implementation("software.amazon.awssdk:regions")
+
 }

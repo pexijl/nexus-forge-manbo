@@ -10,3 +10,34 @@ spring:
   mvc:
     problemdetails:
       enabled: true # Problem Details for HTTP APIs 规范的错误响应格式
+
+storage:
+  vendor: minio # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
+
+  minio:
+    default:
+      endpoint: http://localhost:9000
+      region: us-east-1
+      access-key: minioadmin
+      secret-key: minioadmin
+      bucket: nexus-forge
+      path-style: true
+
+  aliyun:
+    default:
+      endpoint: https://oss-cn-beijing.aliyuncs.com
+      region: cn-beijing
+      access-key: ${ALIYUN_AK}          # ★ 从环境变量读
+      secret-key: ${ALIYUN_SK}
+      bucket: my-app-prod
+      path-style: false
+      cdn-domain: https://cdn.example.com  # ★ CDN 加速域名
+
+  tencent:
+    default:
+      endpoint: https://cos.ap-beijing.myqcloud.com
+      region: ap-beijing
+      secret-id: ${TENCENT_SECRET_ID}
+      secret-key: ${TENCENT_SECRET_KEY}
+      bucket: my-app-prod-1250000000    # ★ 腾讯云 bucket 名带 APPID 后缀
+      path-style: false

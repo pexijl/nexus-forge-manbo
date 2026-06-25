@@ -25,3 +25,6 @@ jwt:
   ttl: 7200000 # 2小时，单位为毫秒
   header: Authorization # 请求头中存放JWT的字段名称
   prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证
+
+storage:
+  vendor: minio
