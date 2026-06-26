@@ -6,11 +6,15 @@
         </div>
         <!-- 右侧：操作区 -->
         <div class="toolbar-right">
+            <Button icon="pi pi-user" variant="text" @click="router.push({ name: 'profile-view' })"/>
         </div>
     </div>
 </template>
 
 <script setup lang="ts">
+
+import  router  from '@/router'
+
 const emit = defineEmits<{
     (e: 'toggle'): void
 }>()
