@@ -2,7 +2,7 @@
 
 一个基于 **Java 26 + Spring Boot 4** 与 **Vue 3** 的全栈应用骨架,按业务能力拆分为 Gradle 多模块项目。
 
-> 当前进度:已跑通 `auth` + `user` 两个核心模块的端到端流程(注册 / 登录 / 鉴权 / 当前用户),其余业务模块(`file` / `ai` / `visual` / `core`)处于规划阶段。
+> 当前进度:已跑通 `auth` + `user` + `file` 三个核心模块的端到端流程(注册 / 登录 / 鉴权 / 当前用户 / 文件存储),其余业务模块(`ai` / `visual` / `core`)处于规划阶段。
 
 ---
 
@@ -41,7 +41,7 @@ nexus-forge/
 ├── nexus-forge-core/         # 核心基础设施(占位)
 ├── nexus-forge-auth/         # 认证:Spring Security + JWT
 ├── nexus-forge-user/         # 用户:实体、注册、当前用户查询
-├── nexus-forge-file/         # 文件(占位)
+├── nexus-forge-file/         # 文件:对象存储抽象、S3/MinIO/阿里云/腾讯云实现
 ├── nexus-forge-ai/           # AI 能力(占位)
 ├── nexus-forge-visual/       # 可视化(占位)
 └── nexus-forge-ui/           # 前端(Vue 3)
@@ -141,6 +141,13 @@ npm run dev
 - `User` 实体:账号、邮箱、加密密码、昵称、头像、手机号、状态(`ACTIVE` / `DISABLED`)、角色集合、`lastLoginAt`
 - `GET /users/me` — 基于 `@AuthenticationPrincipal UserPrincipal` 拉取当前登录用户信息
 
+### 文件(`nexus-forge-file`)
+
+- `StorageProvider` — 统一存储接口(upload / download / delete / presignedUrl / exists)
+- `S3StorageProvider` — S3/MinIO/阿里云 OSS/腾讯云 COS 实现
+- `StorageProperties` — 多厂商配置绑定(endpoint / bucket / access-key / secret-key / region / path-style)
+- `FileController` — 文件上传、下载、删除、预签名 URL、分片上传接口
+
 ### 公共(`nexus-forge-common`)
 
 - `Result<T>` — 统一响应包装(`code` / `message` / `data`)
@@ -179,7 +186,7 @@ npm run dev
 ## 待开发
 
 - [ ] `nexus-forge-core`:通用中间件(日志、缓存、幂等、限流)
-- [ ] `nexus-forge-file`:对象存储 / 本地上传抽象
+- [x] `nexus-forge-file`:对象存储 / 本地上传抽象
 - [ ] `nexus-forge-ai`:LLM 调用网关、流式响应、向量检索
 - [ ] `nexus-forge-visual`:图表 / 看板组件
 - [ ] 前端:`/home` 业务页、`/users/me` 个人中心、权限路由
