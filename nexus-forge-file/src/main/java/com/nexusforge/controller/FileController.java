@@ -14,7 +14,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -97,4 +99,41 @@ public class FileController {
         return Result.success(getUrl);
     }
 
+    /**
+     * 前端请求 init：后端返回 uploadId
+     */
+    @PostMapping("/multipart/init")
+    public Result<?> initMultipart(@RequestParam String key,
+                                             @RequestParam String contentType) {
+        String uploadId = storageProvider.initiateMultipartUpload(storageProps.getActive().getBucket(), key, contentType);
+        Map<String, String> data = Map.of("uploadId", uploadId, "key", key);
+        return Result.success(data);
+    }
+
+    /**
+     * 前端请求每个分片的签名 URL
+     */
+    @PostMapping("/multipart/presign-part")
+    public Result<?> presignPart(@RequestParam String key,
+                                           @RequestParam String uploadId,
+                                           @RequestParam int partNumber,
+                                           @RequestParam(defaultValue = "3600") int expiry) {
+        // ★ 阿里云 OSS：直接用 AWS S3 SDK 的 presignPutObject + 自己拼 partNumber 参数
+        String url = storageProvider.generatePresignedPutUrl(storageProps.getActive().getBucket(), key, Duration.ofSeconds(expiry));
+        Map<String, String> data = Map.of("url", url, "partNumber", String.valueOf(partNumber));
+        return Result.success(data);
+    }
+
+    /**
+     * 前端请求 part 完成（报告 ETag）
+     * 前端请求 complete：合并所有分片
+     */
+    @PostMapping("/multipart/complete")
+    public Result<?> completeMultipart(@RequestParam String key,
+                                                 @RequestParam String uploadId,
+                                                 @RequestBody List<String> partETags) {
+        String location = storageProvider.completeMultipartUpload(storageProps.getActive().getBucket(), key, uploadId, partETags);
+        Map<String, String> data = Map.of("location", location, "key", key);
+        return Result.success(data);
+    }
 }
