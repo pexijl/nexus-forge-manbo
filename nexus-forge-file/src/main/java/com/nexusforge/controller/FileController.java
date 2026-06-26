@@ -45,7 +45,9 @@ public class FileController {
         return Result.success(new UploadResult(key, file.getSize()));
     }
 
-    /** 下载文件 */
+    /**
+     * 下载文件
+     */
     @GetMapping("/download/{key:.+}")
     public void download(@PathVariable String key, HttpServletResponse resp) throws IOException {
         try (InputStream in = storageProvider.download(storageProps.getActive().getBucket(), key)) {
@@ -57,32 +59,42 @@ public class FileController {
         }
     }
 
-    /** 删除文件 */
+    /**
+     * 删除文件
+     */
     @DeleteMapping("/{key:.+}")
     public void delete(@PathVariable String key) {
         storageProvider.delete(storageProps.getActive().getBucket(), key);
     }
 
-    /** 批量删除 */
+    /**
+     * 批量删除
+     */
     @DeleteMapping("/batch")
     public void deleteBatch(@RequestBody List<String> keys) {
         storageProvider.deleteBatch(storageProps.getActive().getBucket(), keys);
     }
 
-    /** 生成前端直传 PUT URL */
+    /**
+     * 生成前端直传 PUT URL
+     */
     @GetMapping("/presigned/put")
-    public String presignedPutUrl(@RequestParam String key,
-                                  @RequestParam(defaultValue = "600") int expirySeconds) {
-        return storageProvider.generatePresignedPutUrl(storageProps.getActive().getBucket(),
+    public Result<?> presignedPutUrl(@RequestParam String key,
+                                     @RequestParam(defaultValue = "600") int expirySeconds) {
+        String putUrl = storageProvider.generatePresignedPutUrl(storageProps.getActive().getBucket(),
                 key, Duration.ofSeconds(expirySeconds));
+        return Result.success(putUrl);
     }
 
-    /** 生成前端直传 GET URL（私有 bucket 临时访问） */
+    /**
+     * 生成前端直传 GET URL（私有 bucket 临时访问）
+     */
     @GetMapping("/presigned/get")
-    public String presignedGetUrl(@RequestParam String key,
-                                  @RequestParam(defaultValue = "3600") int expirySeconds) {
-        return storageProvider.generatePresignedGetUrl(storageProps.getActive().getBucket(),
+    public Result<?> presignedGetUrl(@RequestParam String key,
+                                     @RequestParam(defaultValue = "3600") int expirySeconds) {
+        String getUrl = storageProvider.generatePresignedGetUrl(storageProps.getActive().getBucket(),
                 key, Duration.ofSeconds(expirySeconds));
+        return Result.success(getUrl);
     }
 
 }
