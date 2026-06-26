@@ -109,16 +109,16 @@
 
 ### StorageProvider SPI
 
-- [ ] 定义 `StorageProvider` 接口:`upload` / `download` / `delete` / `presignedUrl` / `exists`
-- [ ] 通过 `@ConditionalOnProperty(prefix = "nexus-forge.file", name = "provider")` 选择实现
-- [ ] 统一配置:`endpoint` / `bucket` / `access-key` / `secret-key` / `region` / `path-style`
+- [x] 定义 `StorageProvider` 接口:`upload` / `download` / `delete` / `presignedUrl` / `exists`
+- [x] 通过 `@ConfigurationProperties(prefix = "storage")` 选择实现
+- [x] 统一配置:`endpoint` / `bucket` / `access-key` / `secret-key` / `region` / `path-style`
 
 ### MinIO 开发环境(本地)
 
-- [ ] Docker Compose 启动 MinIO(API `:9000` + Console `:9001`)
-- [ ] 启动脚本自动创建 bucket(`nexus-forge-dev`)
-- [ ] `MinIOStorageProvider` 实现(基于 `software.amazon.awssdk:s3`)
-- [ ] `application-dev.yaml` 完整配置示例
+- [x] Docker Compose 启动 MinIO(API `:9000` + Console `:9001`)
+- [x] 启动脚本自动创建 bucket(`nexus-forge-dev`)
+- [x] `S3StorageProvider` 实现(基于 `software.amazon.awssdk:s3`,兼容 MinIO)
+- [x] `application-dev.yaml` 完整配置示例
 - [ ] Console Web UI 调试入口文档
 
 ### 测试环境(S3 兼容)
@@ -128,17 +128,17 @@
 
 ### 生产环境(阿里云 OSS / 腾讯云 COS)
 
-- [ ] 阿里云 OSS 适配:`endpoint = https://oss-cn-<region>.aliyuncs.com`
-- [ ] 腾讯云 COS 适配:`endpoint = https://cos-<region>.tencentcos.cn`
-- [ ] `application-prod.yaml` 配置模板(各 provider 切换示例)
+- [x] 阿里云 OSS 适配:`endpoint = https://oss-cn-<region>.aliyuncs.com`
+- [x] 腾讯云 COS 适配:`endpoint = https://cos-<region>.tencentcos.cn`
+- [x] `application-prod.yaml` 配置模板(各 provider 切换示例)
 - [ ] 若使用厂商特有能力,再单独接入官方 SDK(图片处理 / 回调 / 视频转码)
 
 ### 通用能力
 
-- [ ] `POST /files/upload` 通用上传接口(单文件 / 多文件)
-- [ ] 分片上传 / 秒传(基于文件 hash)/ 断点续传
+- [x] `POST /files/upload` 通用上传接口(单文件 / 多文件)
+- [x] 分片上传 / 秒传(基于文件 hash)/ 断点续传
 - [ ] 图片处理(缩略图、水印)
-- [ ] 文件访问权限与临时签名 URL(presigned)
+- [x] 文件访问权限与临时签名 URL(presigned)
 - [ ] 文件元数据落库(`FileEntity` + `FileRepository`)
 
 ## nexus-forge-ai
