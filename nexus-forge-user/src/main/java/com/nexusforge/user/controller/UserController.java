@@ -28,8 +28,8 @@ public class UserController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestBody UpdateUserDto dto
     ) {
-        // TODO: 修改用户个人信息
-        return Result.success();
+        UserVo userVo = userService.updateUser(principal.userId(), dto);
+        return Result.success(userVo);
     }
 
     @PostMapping("/me/password")

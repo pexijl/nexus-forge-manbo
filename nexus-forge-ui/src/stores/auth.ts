@@ -1,7 +1,7 @@
 import { apiLogin, apiRegister } from '@/api/auth'
-import { apiGetCurrentUser } from '@/api/user'
+import { apiGetUserInfo, apiUpdateUserInfo } from '@/api/user'
 import type { LoginRequest, RegisterRequest } from '@/types/api'
-import type { User, UserInfo } from '@/types/models/user'
+import type { UpdateUserInfo, User, UserInfo } from '@/types/models/user'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import CryptoJS from 'crypto-js'
@@ -23,7 +23,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function fetchUserInfo() {
-        await apiGetCurrentUser().then((res) => {
+        await apiGetUserInfo().then((res) => {
+            userInfo.value = res
+        })
+    }
+
+    async function updateUserInfo(data: UpdateUserInfo) {
+        await apiUpdateUserInfo(data).then((res) => {
             userInfo.value = res
         })
     }
@@ -33,7 +39,8 @@ export const useAuthStore = defineStore('auth', () => {
         userInfo,
         register,
         login,
-        fetchUserInfo
+        fetchUserInfo,
+        updateUserInfo
     }
 }, {
     persist: {

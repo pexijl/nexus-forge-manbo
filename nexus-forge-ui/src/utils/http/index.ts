@@ -12,7 +12,7 @@ class HttpClient {
 
   async request<T = unknown>(config: AxiosRequestConfig & RequestConfig): Promise<T> {
     const res = await this.instance.request<ApiResponse<T>>(config)
-      return res.data.data
+    return res.data.data
   }
 
   get<T = unknown>(url: string, config?: AxiosRequestConfig & RequestConfig): Promise<T> {
@@ -29,6 +29,10 @@ class HttpClient {
 
   delete<T = unknown>(url: string, config?: AxiosRequestConfig & RequestConfig): Promise<T> {
     return this.request<T>({ ...config, url, method: 'DELETE' })
+  }
+
+  patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig & RequestConfig): Promise<T> {
+    return this.request<T>({ ...config, url, method: 'PATCH', data })
   }
 }
 

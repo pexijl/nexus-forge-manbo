@@ -38,3 +38,10 @@ export interface UserInfo {
     status: UserStatus;
     roles: string[];
 }
+
+export interface UpdateUserInfo {
+    email?: string;
+    nickname?: string;
+    avatarUrl?: string;
+    phone?: string;
+}
