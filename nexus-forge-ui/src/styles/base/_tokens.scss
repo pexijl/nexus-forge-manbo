@@ -1,0 +1,70 @@
+/* ────────────────────────────────────────────────────────────
+ * Design tokens — verbatim from account-center.html.
+ * No raw hex outside this block. Every visual value below reads
+ * from var(--*).
+ * ──────────────────────────────────────────────────────────── */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --fg: #111111;
+  --muted: #6b6b6b;
+
+  --border: #e5e5e5;
+  --border-soft: var(--border);
+
+  --accent: #2f6feb;
+  --accent-on: #ffffff;
+  --accent-hover: color-mix(in oklab, var(--accent), black 8%);
+  --accent-active: color-mix(in oklab, var(--accent), black 14%);
+
+  --success: #17a34a;
+  --warn: #eab308;
+  --danger: #dc2626;
+
+  --font-display: "Inter", -apple-system, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: var(--font-display);
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", "Menlo", monospace;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 20px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  --leading-body: 1.5;
+  --leading-tight: 1.2;
+  --tracking-display: -0.01em;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-raised: 0 2px 8px color-mix(in oklab, var(--fg), transparent 92%);
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 70%);
+
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  --container-max: 1200px;
+  --container-gutter-desktop: 24px;
+  --container-gutter-tablet: 16px;
+  --container-gutter-phone: 12px;
+
+  /* App-shell layout tokens */
+  --shell-sidebar-w: 248px;
+  --shell-topbar-h: 56px;
+  --shell-content-max: 720px;
+}
