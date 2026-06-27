@@ -2,6 +2,8 @@
 
 @use 'abstracts' as a;
 
+@use 'base' as b;
+
 html {
   color: var(--text-primary);
   background-color: var(--bg-primary);
