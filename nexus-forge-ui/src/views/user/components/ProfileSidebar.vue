@@ -2,7 +2,7 @@
     <aside class="profile-sidebar" aria-label="账号设置">
         <div class="sidebar-section">
             <div class="sidebar-label eyebrow">账号</div>
-            <nav class="nav-list" role="tablist" aria-orientation="vertical">
+            <nav aria-label="个人中心导航" class="nav-list" >
                 <button
                     v-for="tab in accountTabs"
                     :key="tab.id"
