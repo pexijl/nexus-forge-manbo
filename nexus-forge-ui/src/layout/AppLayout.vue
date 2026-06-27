@@ -27,12 +27,13 @@ const { sidebarVisible } = storeToRefs(layoutStore)
 .app-layout-container {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    height: 100vh;            /* 锁定视口高度，交给内部 main 自适应 */
 }
 
 .main-content {
-    position: relative;   /* 作为 absolute 定位的参照 */
-    overflow: hidden;     /* 遮罩不会溢出到 toolbar */
-    flex: 1;
+    position: relative;       /* 作为 absolute 定位的参照 */
+    flex: 1;                  /* 占满 toolbar 之外的空间 */
+    min-height: 0;            /* 关键：允许子项收缩，让 overflow 生效 */
+    overflow: hidden;         /* 遮罩不会溢出到 toolbar */
 }
 </style>
