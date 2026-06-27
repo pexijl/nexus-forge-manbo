@@ -30,9 +30,6 @@ const emit = defineEmits<{
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border-color);
     box-shadow: var(--shadow-md);
-    position: sticky;
-    top: 0;
-    z-index: 100;
 }
 
 .toolbar-left {

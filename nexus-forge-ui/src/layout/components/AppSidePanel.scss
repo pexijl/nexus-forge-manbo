@@ -1,6 +1,6 @@
 /* 遮罩层 */
 .side-panel-mask {
-    position: absolute;
+    position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
     z-index: 999;
@@ -8,7 +8,7 @@
 
 /* 面板 */
 .app-side-panel {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 300px;

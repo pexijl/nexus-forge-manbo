@@ -1,6 +1,8 @@
 <template>
     <div class="app-layout-container">
-        <AppToolbar @toggle="layoutStore.toggleSidebar" />
+        <header class="app-header">
+            <AppToolbar @toggle="layoutStore.toggleSidebar" />
+        </header>
         <main class="main-content">
             <router-view />
             <AppSidePanel v-model:visible="sidebarVisible">
@@ -28,6 +30,13 @@ const { sidebarVisible } = storeToRefs(layoutStore)
     display: flex;
     flex-direction: column;
     min-height: 100vh;        /* 整页自然滚动，sticky 子元素可生效 */
+}
+
+.app-header {
+    position: sticky;         /* 包裹层 sticky，避免 flex 子项 + sticky 打架 */
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
 }
 
 .main-content {
