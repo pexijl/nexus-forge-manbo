@@ -7,7 +7,7 @@
  
         </aside>
         <!-- 可切换内容区 -->
-        <main class="profile-content">
+        <main class="profile-content hide-scrollbar">
             <!-- 这里放个人资料详情 -->
              <div v-for="n in 500" :key="n">
                 <p>个人资料内容行 {{ n }}</p>
@@ -64,18 +64,6 @@ import { ref } from 'vue';
     /* 关键：只让右侧内容区滚动 */
     overflow-y: auto;
     overflow-x: hidden;
-
-    /* 美化滚动条（可选） */
-    &::-webkit-scrollbar {
-        width: 6px;
-    }
-    &::-webkit-scrollbar-thumb {
-        background: #d0d0d0;
-        border-radius: 3px;
-    }
-    &::-webkit-scrollbar-track {
-        background: transparent;
-    }
 }
 
 // 可选：移动端适配（屏幕小于768px时，侧边栏变顶部导航）
