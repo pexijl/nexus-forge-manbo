@@ -148,48 +148,67 @@ textarea::placeholder {
   color: var(--muted);
 }
 
-/* ─── Cards ─────────────────────────────────────────────── */
+/*  Cards  */
 .card {
+  /* 背景色：使用主题变量，便于暗色/亮色模式切换 */
   background: var(--surface);
+
+  /* 边框：1px 实线，颜色由主题变量控制 */
   border: 1px solid var(--border);
+
+  /* 圆角：中等圆角，统一卡片视觉风格 */
   border-radius: var(--radius-md);
+
+  /* 内边距 */
   padding: var(--space-6);
+
+  /* 弹性布局：子元素垂直排列 */
   display: flex;
   flex-direction: column;
+
+  /* 子元素间距：垂直方向各元素间隔 */
   gap: var(--space-4);
 }
+
 .card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
 }
+
 .card-title-block {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
+
 .card-title {
   font-size: var(--text-base);
   font-weight: 600;
 }
+
 .card-desc {
   font-size: var(--text-sm);
   color: var(--muted);
 }
 
+/* 相邻兄弟选择器：当 .section-card 紧跟在另一个 .section-card 后面时生效 */
 .section-card + .section-card {
+  /* 上边距：让连续的卡片之间产生间距，第一个卡片不受影响 */
   margin-top: var(--space-4);
 }
+
 .danger-card {
   border-color: color-mix(in oklab, var(--danger), transparent 70%);
 }
+
 .danger-card .card-title {
   color: var(--danger);
 }
 
-/* ─── Badges ────────────────────────────────────────────── */
+/*  Badges  */
 .badge {
   display: inline-flex;
   align-items: center;

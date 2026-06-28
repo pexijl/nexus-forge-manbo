@@ -9,11 +9,11 @@
       <AvatarUploader />
       <div class="avatar-meta">
         <div class="avatar-name">林晚</div>
-        <div class="body-sm body-muted" style="margin-top: 4px">注册于 2024 年 3 月 · 启明科技</div>
+        <div class="avatar-location">注册于 2024 年 3 月 · 启明科技</div>
       </div>
       <div class="avatar-actions">
-        <button class="btn btn-secondary btn-sm" type="button">更换头像</button>
-        <button class="btn btn-ghost btn-sm" type="button">移除</button>
+        <Button label="更换头像" severity="primary" variant="text" size="small" />
+        <Button label="移除头像" severity="danger" variant="text" size="small" />
       </div>
     </article>
 
@@ -178,13 +178,24 @@ const bioLen = computed(() => bio.value.length);
 .avatar-card .avatar-meta {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .avatar-card .avatar-name {
   font-size: var(--text-base);
   font-weight: 600;
+}
+
+.avatar-card .avatar-location {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.avatar-card .avatar-actions {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--space-2);
 }
 
 .handle-input {

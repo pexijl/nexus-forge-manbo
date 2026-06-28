@@ -8,6 +8,7 @@ export const userRoutes: RouteRecordRaw[] = [
     {
         path: 'profile',
         name: 'profile-view',
+        redirect: { name: 'profile-basic' },
         component: () => import('@/views/user/ProfileView.vue'),
         children: [
             { path: '', name: 'profile-basic', component: BasicPanel },
