@@ -10,7 +10,10 @@ spring:
   mvc:
     problemdetails:
       enabled: true # Problem Details for HTTP APIs 规范的错误响应格式
-
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 100MB
 storage:
   vendor: minio # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
 
