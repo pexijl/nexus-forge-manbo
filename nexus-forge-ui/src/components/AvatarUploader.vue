@@ -47,9 +47,6 @@ defineEmits<{ (e: 'upload'): void }>();
 }
 
 .avatar-display {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 100%;
   height: 100%;
   border-radius: 50%;
@@ -60,7 +57,15 @@ defineEmits<{ (e: 'upload'): void }>();
   &__image {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    :deep(.p-avatar-image) {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
   }
 
   &__placeholder {
@@ -75,7 +80,7 @@ defineEmits<{ (e: 'upload'): void }>();
   justify-content: center;
   align-items: center;
   position: absolute;
-  
+
   inset: 0;
   color: #fff;
   gap: var(--space-2);
