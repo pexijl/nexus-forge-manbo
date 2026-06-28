@@ -65,6 +65,38 @@
 
   /* App-shell layout tokens */
   --shell-sidebar-w: 248px;
-  --shell-topbar-h: 56px;
+  --shell-topbar-h: 60px;
   --shell-content-max: 720px;
+
+  /* Background & surface aliases (consumed by AppToolbar, etc.) */
+  --bg-primary: var(--bg);
+  --border-color: var(--border);
+  --shadow-md: var(--elev-raised);
+
+  /* Neutral scale (Tailwind-style) — for badges, hover, dividers */
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-900: #111827;
+
+  /* Primary scale — derived from --accent */
+  --color-primary-50: color-mix(in oklab, var(--accent), white 88%);
+  --color-primary-100: color-mix(in oklab, var(--accent), white 78%);
+  --color-primary-500: var(--accent);
+  --color-primary-600: var(--accent-hover);
+  --color-primary-700: var(--accent-active);
+
+  /* Semantic scales */
+  --color-green-50: color-mix(in oklab, var(--success), white 86%);
+  --color-green-600: var(--success);
+  --color-amber-50: color-mix(in oklab, var(--warn), white 86%);
+  --color-amber-600: var(--warn);
+  --color-red-50: color-mix(in oklab, var(--danger), white 88%);
+  --color-red-600: var(--danger);
+
+  /* Radius alias used by nav items / pills */
+  --radius-full: var(--radius-pill);
 }

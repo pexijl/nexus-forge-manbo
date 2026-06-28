@@ -6,37 +6,49 @@
         <Button
           v-for="tab in accountTabs"
           :key="tab.id"
-          type="button"
-          role="tab"
+          unstyled
+          :pt="{
+            root: { class: 'profile-sidebar-nav-btn' },
+            label: 'profile-sidebar-nav-label',
+            icon: 'profile-sidebar-nav-icon',
+          }"
           :aria-current="active === tab.id ? 'true' : 'false'"
-          :label="tab.label"
-          :icon="tab.icon"
-          :badge="tab.badge || undefined"
-          :badgeSeverity="tab.badgeVariant || 'secondary'"
-          :severity="active === tab.id ? 'primary' : 'secondary'"
-          variant="text"
-          rounded
           @click="$emit('switch', tab.id)"
-          class=""
-          pt:root="profile-sidebar-nav-btn-root"
-          pt:label="my-custom-label-class"
-        />
+        >
+          <template #default>
+            <i :class="tab.icon" class="profile-sidebar-nav-icon" />
+            <span class="profile-sidebar-nav-label">{{ tab.label }}</span>
+            <span
+              v-if="tab.badge"
+              class="badge profile-sidebar-nav-badge"
+              :class="`badge-${tab.badgeVariant || 'muted'}`"
+            >
+              <span v-if="tab.badgeDot" class="badge-dot" aria-hidden="true" />
+              {{ tab.badge }}
+            </span>
+          </template>
+        </Button>
       </nav>
     </div>
 
     <div class="sidebar-section">
       <div class="sidebar-label eyebrow">工作区</div>
-      <nav class="nav-list" aria-label="工作区">
+      <nav class="nav-list nav-list-workspace" aria-label="工作区">
         <Button
           v-for="link in workspaceLinks"
           :key="link.label"
-          :label="link.label"
-          :icon="link.icon"
-          variant="text"
-          severity="secondary"
-          rounded
-          class="nav-item"
-        />
+          unstyled
+          :pt="{
+            root: { class: 'profile-sidebar-nav-btn profile-sidebar-nav-btn--muted' },
+            label: 'profile-sidebar-nav-label',
+            icon: 'profile-sidebar-nav-icon',
+          }"
+        >
+          <template #default>
+            <i :class="link.icon" class="profile-sidebar-nav-icon" />
+            <span class="profile-sidebar-nav-label">{{ link.label }}</span>
+          </template>
+        </Button>
       </nav>
     </div>
   </aside>
@@ -44,6 +56,8 @@
 
 <script setup lang="ts">
 import Button from 'primevue/button';
+
+type BadgeVariant = 'info' | 'success' | 'warn' | 'muted';
 
 defineProps<{
   active: string;
@@ -53,7 +67,14 @@ defineEmits<{
   (e: 'switch', tab: string): void;
 }>();
 
-const accountTabs = [
+const accountTabs: Array<{
+  id: string;
+  label: string;
+  icon: string;
+  badge?: string;
+  badgeVariant?: BadgeVariant;
+  badgeDot?: boolean;
+}> = [
   { id: 'profile', label: '基础资料', icon: 'pi pi-user' },
   { id: 'contact', label: '联系方式', icon: 'pi pi-envelope' },
   {
@@ -73,7 +94,7 @@ const accountTabs = [
   },
 ];
 
-const workspaceLinks = [
+const workspaceLinks: Array<{ label: string; icon: string }> = [
   { label: '团队成员', icon: 'pi pi-users' },
   { label: '账单与订阅', icon: 'pi pi-file-invoice' },
   { label: '集成与 API', icon: 'pi pi-plug' },
@@ -81,10 +102,10 @@ const workspaceLinks = [
 </script>
 
 <style scoped lang="scss">
+/* ── Sidebar 容器 ──────────────────────────────────────────── */
 .profile-sidebar {
   align-self: start;
   padding-block: var(--space-8);
-  /* sticky 让 sidebar 跟随页面滚动保持可见 */
   position: sticky;
   top: calc(var(--shell-topbar-h) + var(--space-6));
 }
@@ -98,28 +119,107 @@ const workspaceLinks = [
   margin-bottom: var(--space-2);
 }
 
+/* ── Nav list ──────────────────────────────────────────────── */
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px; /* 与参考 HTML 一致：紧凑的导航密度 */
 }
 
-.profile-sidebar-nav-btn-root {
+/* ── Nav button —— 完全对齐参考 HTML 的 .nav-item ────────── */
+.profile-sidebar-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
   width: 100%;
-  justify-content: flex-start;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
-.nav-item {
-  width: 100%;
-  justify-content: flex-start;
+.profile-sidebar-nav-btn:hover {
+  background: var(--surface);
 }
 
-/* 为工作区链接添加不同样式 */
-.nav-list:last-child .nav-item {
-  opacity: 0.8;
+.profile-sidebar-nav-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.nav-list:last-child .nav-item:hover {
+/* 激活态 —— 用 [aria-current="true"] 而不是 class（更 a11y 友好） */
+.profile-sidebar-nav-btn[aria-current='true'] {
+  background: color-mix(in oklab, var(--accent), transparent 90%);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ── 图标颜色独立（参考：muted 默认，accent 激活） ───────── */
+.profile-sidebar-nav-icon {
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.profile-sidebar-nav-btn[aria-current='true'] .profile-sidebar-nav-icon {
+  color: var(--accent);
+}
+
+/* ── Label ─────────────────────────────────────────────────── */
+.profile-sidebar-nav-label {
+  flex: 1;
+  text-align: left;
+}
+
+/* ── Badge（右上角徽标）── 参考的 .badge 样式 ────────────── */
+.profile-sidebar-nav-badge {
+  margin-left: auto;
+  /* 复用 tokens.scss 的 .badge 基础样式，这里只重置 border + padding */
+  border: none;
+  padding: 2px 8px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge-muted {
+  color: var(--muted);
+  background: color-mix(in oklab, var(--muted), transparent 88%);
+}
+
+.badge-info {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent), transparent 90%);
+}
+
+.badge-success {
+  color: var(--success);
+  background: color-mix(in oklab, var(--success), transparent 90%);
+}
+
+.badge-warn {
+  color: var(--warn);
+  background: color-mix(in oklab, var(--warn), transparent 88%);
+}
+
+/* ── 工作区：次要导航，视觉稍弱（用 class 而非 :last-child） ─ */
+.profile-sidebar-nav-btn--muted {
+  opacity: 0.75;
+}
+
+.profile-sidebar-nav-btn--muted:hover {
   opacity: 1;
 }
 </style>
