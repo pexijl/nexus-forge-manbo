@@ -36,3 +36,4 @@ out/
 ### VS Code ###
 .vscode/
 docker/MinIO/minio.license
+.codegraph/daemon.pid

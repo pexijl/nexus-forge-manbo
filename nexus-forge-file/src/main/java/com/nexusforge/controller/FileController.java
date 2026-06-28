@@ -2,6 +2,7 @@ package com.nexusforge.controller;
 
 import com.nexusforge.base.Result;
 import com.nexusforge.config.StorageProperties;
+import com.nexusforge.service.FileService;
 import com.nexusforge.storage.StorageProvider;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -28,31 +29,24 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class FileController {
 
-    private final StorageProvider storageProvider;
-    private final StorageProperties storageProps;
+    private final FileService fileService;
 
     public record UploadResult(String key, long size) {
     }
 
     @PostMapping("/upload")
     public Result<?> upload(@RequestParam MultipartFile file) throws IOException {
-        // ★ ObjectKey 设计：日期分桶 + UUID 前缀，避免热点
-        String datePath = LocalDate.now().toString().replace("-", "/");
-        String key = String.format("%s/%s-%s", datePath, UUID.randomUUID(), file.getOriginalFilename());
-
-        try (InputStream in = file.getInputStream()) {
-            storageProvider.upload(storageProps.getActive().getBucket(), key, in,
-                    file.getSize(), file.getContentType());
-        }
+        String key = fileService.upload(file);
         return Result.success(new UploadResult(key, file.getSize()));
     }
+
 
     /**
      * 下载文件
      */
     @GetMapping("/download/{key:.+}")
     public void download(@PathVariable String key, HttpServletResponse resp) throws IOException {
-        try (InputStream in = storageProvider.download(storageProps.getActive().getBucket(), key)) {
+        try (InputStream in = fileService.download(key)) {
             resp.setContentType("application/octet-stream");
             resp.setHeader("Content-Disposition",
                     "attachment; filename=" + URLEncoder.encode(
@@ -65,16 +59,18 @@ public class FileController {
      * 删除文件
      */
     @DeleteMapping("/{key:.+}")
-    public void delete(@PathVariable String key) {
-        storageProvider.delete(storageProps.getActive().getBucket(), key);
+    public Result<Void> delete(@PathVariable String key) {
+        fileService.delete(key);
+        return Result.success();
     }
 
     /**
      * 批量删除
      */
     @DeleteMapping("/batch")
-    public void deleteBatch(@RequestBody List<String> keys) {
-        storageProvider.deleteBatch(storageProps.getActive().getBucket(), keys);
+    public Result<Void> deleteBatch(@RequestBody List<String> keys) {
+        fileService.deleteBatch(keys);
+        return Result.success();
     }
 
     /**
@@ -83,8 +79,7 @@ public class FileController {
     @GetMapping("/presigned/put")
     public Result<?> presignedPutUrl(@RequestParam String key,
                                      @RequestParam(defaultValue = "600") int expirySeconds) {
-        String putUrl = storageProvider.generatePresignedPutUrl(storageProps.getActive().getBucket(),
-                key, Duration.ofSeconds(expirySeconds));
+        String putUrl = fileService.generatePresignedPutUrl(key, expirySeconds);
         return Result.success(putUrl);
     }
 
@@ -94,8 +89,7 @@ public class FileController {
     @GetMapping("/presigned/get")
     public Result<?> presignedGetUrl(@RequestParam String key,
                                      @RequestParam(defaultValue = "3600") int expirySeconds) {
-        String getUrl = storageProvider.generatePresignedGetUrl(storageProps.getActive().getBucket(),
-                key, Duration.ofSeconds(expirySeconds));
+        String getUrl = fileService.generatePresignedGetUrl(key, expirySeconds);
         return Result.success(getUrl);
     }
 
@@ -104,8 +98,8 @@ public class FileController {
      */
     @PostMapping("/multipart/init")
     public Result<?> initMultipart(@RequestParam String key,
-                                             @RequestParam String contentType) {
-        String uploadId = storageProvider.initiateMultipartUpload(storageProps.getActive().getBucket(), key, contentType);
+                                   @RequestParam String contentType) {
+        String uploadId = fileService.initMultipartUpload(key, contentType);
         Map<String, String> data = Map.of("uploadId", uploadId, "key", key);
         return Result.success(data);
     }
@@ -115,12 +109,13 @@ public class FileController {
      */
     @PostMapping("/multipart/presign-part")
     public Result<?> presignPart(@RequestParam String key,
-                                           @RequestParam String uploadId,
-                                           @RequestParam int partNumber,
-                                           @RequestParam(defaultValue = "3600") int expiry) {
-        // ★ 阿里云 OSS：直接用 AWS S3 SDK 的 presignPutObject + 自己拼 partNumber 参数
-        String url = storageProvider.generatePresignedPutUrl(storageProps.getActive().getBucket(), key, Duration.ofSeconds(expiry));
-        Map<String, String> data = Map.of("url", url, "partNumber", String.valueOf(partNumber));
+                                 @RequestParam String uploadId,
+                                 @RequestParam int partNumber,
+                                 @RequestParam(defaultValue = "3600") int expiry) {
+        String url = fileService.presignPartUrl(key, expiry);
+        Map<String, String> data = new HashMap<>();
+        data.put("url", url);
+        data.put("partNumber", String.valueOf(partNumber));
         return Result.success(data);
     }
 
@@ -130,9 +125,9 @@ public class FileController {
      */
     @PostMapping("/multipart/complete")
     public Result<?> completeMultipart(@RequestParam String key,
-                                                 @RequestParam String uploadId,
-                                                 @RequestBody List<String> partETags) {
-        String location = storageProvider.completeMultipartUpload(storageProps.getActive().getBucket(), key, uploadId, partETags);
+                                       @RequestParam String uploadId,
+                                       @RequestBody List<String> partETags) {
+        String location = fileService.completeMultipartUpload(key, uploadId, partETags);
         Map<String, String> data = Map.of("location", location, "key", key);
         return Result.success(data);
     }

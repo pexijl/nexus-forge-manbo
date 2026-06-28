@@ -4,7 +4,7 @@
     class="avatar-wrapper"
     type="button"
     :aria-label="avatarUrl ? '更换头像' : '上传头像'"
-    @click="$emit('upload')"
+    @click="fileInput?.click()"
   >
     <!-- 头像显示 -->
     <div class="avatar-display">
@@ -17,11 +17,32 @@
       <span class="avatar-overlay__text">更换头像</span>
     </div>
   </button>
+  <!-- 隐藏的文件输入 -->
+  <input
+    id="avatar-upload"
+    aria-label="上传头像"
+    ref="fileInput"
+    type="file"
+    accept="image/*"
+    hidden
+    @change="onFileChange"
+  />
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
+// TODO: 组件自己实现上传逻辑，或者使用第三方库（如 vue-filepond）
 defineProps<{ avatarUrl?: string }>();
-defineEmits<{ (e: 'upload'): void }>();
+const emit = defineEmits<{ (e: 'change', file: File): void }>();
+
+const fileInput = ref<HTMLInputElement>();
+
+const onFileChange = (e: Event) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) emit('change', file);
+  // 清空，允许重复选择同一文件
+  (e.target as HTMLInputElement).value = '';
+};
 </script>
 
 <style scoped lang="scss">

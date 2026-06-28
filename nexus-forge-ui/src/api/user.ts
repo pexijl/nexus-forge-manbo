@@ -8,3 +8,11 @@ export function apiGetUserInfo() {
 export function apiUpdateUserInfo(data: UpdateUserInfo) {
   return http.patch<UserInfo>('/users/me', { data });
 }
+
+export function apiUploadAvatar(file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return http.post<string>('/users/me/avatar', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
