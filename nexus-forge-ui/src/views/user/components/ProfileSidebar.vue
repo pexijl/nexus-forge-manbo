@@ -96,8 +96,8 @@ const accountTabs: Array<{
 
 const workspaceLinks: Array<{ label: string; icon: string }> = [
   { label: '团队成员', icon: 'pi pi-users' },
-  { label: '账单与订阅', icon: 'pi pi-file-invoice' },
-  { label: '集成与 API', icon: 'pi pi-plug' },
+  { label: '账单与订阅', icon: 'pi pi-wallet' },
+  { label: '集成与 API', icon: 'pi pi-sparkles' },
 ];
 </script>
 
