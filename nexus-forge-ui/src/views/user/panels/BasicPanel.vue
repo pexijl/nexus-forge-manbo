@@ -5,8 +5,16 @@
       <p>这些信息会出现在你的公开资料页和团队成员列表中。</p>
     </div>
 
-    <article class="card section-card">
-      <AvatarUploader name="林晚" user-id="usr_8f4a2c91e6b3" />
+    <article class="card section-card avatar-card">
+      <AvatarUploader />
+      <div class="avatar-meta">
+        <div class="avatar-name">林晚</div>
+        <div class="body-sm body-muted" style="margin-top: 4px">注册于 2024 年 3 月 · 启明科技</div>
+      </div>
+      <div class="avatar-actions">
+        <button class="btn btn-secondary btn-sm" type="button">更换头像</button>
+        <button class="btn btn-ghost btn-sm" type="button">移除</button>
+      </div>
     </article>
 
     <article class="card section-card">
@@ -147,6 +155,38 @@ const bioLen = computed(() => bio.value.length);
 </script>
 
 <style scoped lang="scss">
+.avatar-card {
+  /* 启用 Grid 布局 */
+  display: grid;
+
+  /* 三列：左 | 中 | 右 */
+  /* auto  = 自适应内容宽度（如头像大小）
+     1fr   = 剩余空间全给中间（如用户名、描述）
+     auto  = 自适应内容宽度（如操作按钮） */
+  grid-template-columns: auto 1fr auto;
+
+  /* 列间距：使用 CSS 变量，通常是 1rem/16px */
+  gap: var(--space-4);
+
+  /* 垂直居中对齐三列 */
+  align-items: center;
+
+  /* 内边距：上下 var(--space-4)，左右 var(--space-6) */
+  padding: var(--space-4) var(--space-6);
+}
+
+.avatar-card .avatar-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.avatar-card .avatar-name {
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
 .handle-input {
   display: flex;
   align-items: stretch;

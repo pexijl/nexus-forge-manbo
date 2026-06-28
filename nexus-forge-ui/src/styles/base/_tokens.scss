@@ -6,8 +6,10 @@
 :root {
   --bg: #fafafa;
   --surface: #ffffff;
+  --surface-hover: color-mix(in oklab, var(--surface), black 4%);
   --fg: #111111;
   --muted: #6b6b6b;
+  --overlay-scrim: color-mix(in oklab, var(--fg), transparent 55%);
 
   --border: #e5e5e5;
   --border-soft: var(--border);
@@ -24,13 +26,21 @@
   --font-display: 'Inter', -apple-system, system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-body: var(--font-display);
   --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Menlo', monospace;
-
-  --text-xs: 12px;
-  --text-sm: 14px;
-  --text-base: 16px;
-  --text-lg: 20px;
-  --text-xl: 24px;
-  --text-2xl: 32px;
+  /* 基础字号 */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.875rem; /* 14px */
+  --text-base: 1rem; /* 16px */
+  /* 大字号 */
+  --text-lg: 1.125rem; /* 18px */
+  --text-xl: 1.25rem; /* 20px */
+  --text-2xl: 1.5rem; /* 24px */
+  --text-3xl: 1.875rem; /* 30px */
+  --text-4xl: 2.25rem; /* 36px */
+  --text-5xl: 3rem; /* 48px */
+  --text-6xl: 3.75rem; /* 60px */
+  --text-7xl: 4.5rem; /* 72px */
+  --text-8xl: 6rem; /* 96px */
+  --text-9xl: 8rem; /* 128px */
 
   --leading-body: 1.5;
   --leading-tight: 1.2;
