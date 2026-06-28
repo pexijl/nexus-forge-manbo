@@ -1,5 +1,5 @@
-import { palette } from './colors'
+import { palette } from './colors';
 
 export const semantic = {
-    primary: palette.primary
-}
+  primary: palette.primary,
+};

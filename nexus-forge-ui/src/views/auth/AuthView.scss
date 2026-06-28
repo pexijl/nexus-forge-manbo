@@ -1,52 +1,52 @@
 .auth-view-container {
-    position: relative;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 
-    // 柔和渐变背景
-    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 50%, #bfdbfe 100%);
+  // 柔和渐变背景
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 50%, #bfdbfe 100%);
 
-    // 可选：右上角加一个大光晕装饰
-    &::before {
-        content: '';
-        position: absolute;
-        top: -20%;
-        right: -10%;
-        width: 600px;
-        height: 600px;
-        background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
-        pointer-events: none;
-    }
+  // 可选：右上角加一个大光晕装饰
+  &::before {
+    content: '';
+    position: absolute;
+    top: -20%;
+    right: -10%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
 }
 
 .auth-content {
-    width: 400px;
-    position: relative;
-    z-index: 1;
+  width: 400px;
+  position: relative;
+  z-index: 1;
 
-    // 玻璃拟态
-    background: rgba(255, 255, 255, 0.45);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    border-radius: 16px;
-    box-shadow: 0 20px 60px -15px rgba(59, 130, 246, 0.2);
+  // 玻璃拟态
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px -15px rgba(59, 130, 246, 0.2);
 }
 
 // 切换动画
 .auth-fade-enter-active,
 .auth-fade-leave-active {
-    transition: all 0.25s ease;
+  transition: all 0.25s ease;
 }
 
 .auth-fade-enter-from {
-    opacity: 0;
-    transform: translateX(20px);
+  opacity: 0;
+  transform: translateX(20px);
 }
 
 .auth-fade-leave-to {
-    opacity: 0;
-    transform: translateX(-20px);
+  opacity: 0;
+  transform: translateX(-20px);
 }
