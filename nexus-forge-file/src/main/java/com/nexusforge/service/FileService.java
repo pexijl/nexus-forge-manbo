@@ -1,6 +1,9 @@
 package com.nexusforge.service;
 
 import com.nexusforge.config.StorageProperties;
+import com.nexusforge.enums.ResultCode;
+import com.nexusforge.exception.BusinessException;
+import com.nexusforge.file.FileBizType;
 import com.nexusforge.storage.StorageProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -93,6 +96,7 @@ public class FileService {
 
     /**
      * 删除单个文件
+     *
      * @param key 文件 key
      */
     public void delete(String key) {
@@ -101,6 +105,7 @@ public class FileService {
 
     /**
      * 批量删除文件
+     *
      * @param keys 文件 key 列表
      */
     public void deleteBatch(List<String> keys) {
@@ -109,6 +114,7 @@ public class FileService {
 
     /**
      * 根据完整 URL 删除文件（自动提取 key）
+     *
      * @param url 文件完整 URL
      */
     public void deleteByUrl(String url) {
@@ -118,7 +124,8 @@ public class FileService {
 
     /**
      * 生成前端直传 PUT URL
-     * @param key 文件 key
+     *
+     * @param key           文件 key
      * @param expirySeconds URL 有效期（秒）
      * @return 预签名 PUT URL
      */
@@ -131,7 +138,8 @@ public class FileService {
 
     /**
      * 生成前端直传 GET URL（私有 bucket 临时访问）
-     * @param key 文件 key
+     *
+     * @param key           文件 key
      * @param expirySeconds URL 有效期（秒）
      * @return 预签名 GET URL
      */
@@ -144,7 +152,8 @@ public class FileService {
 
     /**
      * 初始化分片上传
-     * @param key 文件 key
+     *
+     * @param key         文件 key
      * @param contentType 文件 MIME 类型
      * @return uploadId，用于后续分片上传
      */
@@ -156,7 +165,8 @@ public class FileService {
 
     /**
      * 获取分片上传的预签名 URL
-     * @param key 文件 key
+     *
+     * @param key           文件 key
      * @param expirySeconds URL 有效期（秒）
      * @return 预签名 PUT URL
      */
@@ -169,8 +179,9 @@ public class FileService {
 
     /**
      * 完成分片上传
-     * @param key 文件 key
-     * @param uploadId 分片上传的 uploadId
+     *
+     * @param key       文件 key
+     * @param uploadId  分片上传的 uploadId
      * @param partETags 分片的 ETag 列表
      * @return 文件的最终访问 URL
      */
@@ -180,10 +191,9 @@ public class FileService {
         );
     }
 
-    // ── 工具方法 ─────────────────────────────────────────────
-
     /**
      * 获取文件扩展名
+     *
      * @param filename 文件名
      * @return 扩展名（不含点），如果没有扩展名返回空字符串
      */
@@ -196,6 +206,7 @@ public class FileService {
 
     /**
      * 从完整 URL 中提取文件 key
+     *
      * @param url 文件完整 URL
      * @return 文件 key
      */
@@ -211,4 +222,50 @@ public class FileService {
         return lastSlash != -1 ? url.substring(lastSlash + 1) : url;
     }
 
+
+    /**
+     * 按业务类型生成对象 key（仅生成路径，不实际上传）。
+     * <p>key 形如：{prefix}/{ownerId}/{uuid}.{ext}。filename 无扩展名时
+     * 省略 ".{ext}" 部分。ownerId 为空时使用 "anon"。</p>
+     *
+     * <p>与 {@link #uploadAvatar} / {@link #uploadAttachment} 路径规则一致，
+     * 供 {@code FileClientImpl} 在"颁发直传凭证"等不需要文件流的场景复用。</p>
+     *
+     * @param biz      业务类型（必填）
+     * @param ownerId  业务所有者 ID（可空，空时用 "anon"）
+     * @param filename 原始文件名（必填，用于推断扩展名）
+     * @return 对象 key
+     */
+    public String buildKeyForBiz(FileBizType biz, Long ownerId, String filename) {
+        if (biz == null) {
+            throw new BusinessException(ResultCode.FILE_BIZ_TYPE_IS_EMPTY);
+        }
+        String prefix = switch (biz) {
+            case AVATAR -> "avatar";
+            case ATTACHMENT -> "attachment";
+            case AI_IMAGE -> "ai-image";
+            case WORK_EXPORT -> "work-export";
+        };
+        String owner = ownerId == null ? "anon" : String.valueOf(ownerId);
+        String ext = getExtension(filename);
+        String namePart = UUID.randomUUID().toString()
+                + (ext.isEmpty() ? "" : "." + ext);
+        return String.format("%s/%s/%s", prefix, owner, namePart);
+    }
+
+    /**
+     * 按业务类型上传文件（不依赖 MultipartFile）。
+     * <p>业务模块拿到 InputStream 时调用；key 规则与
+     * {@link #buildKeyForBiz} 保持一致。</p>
+     */
+    public String uploadByBiz(FileBizType biz, Long ownerId,
+                              String filename, String contentType,
+                              long size, InputStream in) throws IOException {
+        String key = buildKeyForBiz(biz, ownerId, filename);
+        storageProvider.upload(
+                storageProps.getActive().getBucket(),
+                key, in, size, contentType
+        );
+        return key;
+    }
 }
