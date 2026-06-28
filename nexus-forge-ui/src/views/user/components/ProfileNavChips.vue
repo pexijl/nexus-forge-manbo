@@ -1,30 +1,29 @@
 <template>
   <nav class="profile-nav-chips" aria-label="账号设置">
     <div class="nav-chips-inner" role="tablist">
-      <button
-        v-for="tab in tabs"
+      <router-link
+        v-for="tab in accountTabs"
         :key="tab.id"
+        :to="{ name: tab.routeName }"
+        :aria-current="isActive(tab) ? 'true' : 'false'"
         class="chip"
         role="tab"
-        :aria-current="active === tab.id ? 'true' : 'false'"
-        @click="$emit('switch', tab.id)"
       >
         {{ tab.label }}
-      </button>
+      </router-link>
     </div>
   </nav>
 </template>
 
 <script setup lang="ts">
-defineProps<{ active: string }>();
-defineEmits<{ (e: 'switch', tab: string): void }>();
+import { useRoute } from 'vue-router';
+import { accountTabs } from '../constants/profileTabs';
 
-const tabs = [
-  { id: 'profile', label: '基础资料' },
-  { id: 'contact', label: '联系方式' },
-  { id: 'notifications', label: '通知与隐私' },
-  { id: 'security', label: '账号安全' },
-];
+const route = useRoute();
+
+function isActive(tab: { routeName?: string }) {
+  return route.name === tab.routeName;
+}
 </script>
 
 <style scoped lang="scss">

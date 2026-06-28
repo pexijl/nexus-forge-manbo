@@ -1,60 +1,20 @@
 <template>
   <div class="profile-view">
-    <ProfileNavChips class="mobile-only" :active="active" @switch="onSwitch" />
+    <ProfileNavChips class="mobile-only"/>
 
     <div class="profile-app">
-      <ProfileSidebar class="desktop-only" :active="active" @switch="onSwitch" />
+      <ProfileSidebar class="desktop-only" />
 
       <main class="profile-content">
-        <BasicPanel v-if="active === 'profile'" />
-        <ContactPanel v-else-if="active === 'contact'" />
-        <NotificationPanel v-else-if="active === 'notifications'" />
-        <SecurityPanel v-else-if="active === 'security'" />
+        <router-view/>
       </main>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
 import ProfileSidebar from './components/ProfileSidebar.vue';
 import ProfileNavChips from './components/ProfileNavChips.vue';
-import BasicPanel from './panels/BasicPanel.vue';
-import ContactPanel from './panels/ContactPanel.vue';
-import NotificationPanel from './panels/NotificationPanel.vue';
-import SecurityPanel from './panels/SecurityPanel.vue';
-
-const STORAGE_KEY = 'account-center.active';
-const VALID = ['profile', 'contact', 'notifications', 'security'] as const;
-
-const active = ref<(typeof VALID)[number]>('profile');
-
-// 还原上次激活的 tab
-try {
-  const last = sessionStorage.getItem(STORAGE_KEY);
-  if (last && (VALID as readonly string[]).includes(last)) {
-    active.value = last as (typeof VALID)[number];
-  }
-} catch {
-  /* ignore */
-}
-
-// 持久化当前 tab
-watch(active, (v) => {
-  try {
-    sessionStorage.setItem(STORAGE_KEY, v);
-  } catch {
-    /* ignore */
-  }
-});
-
-function onSwitch(tab: string) {
-  if ((VALID as readonly string[]).includes(tab)) {
-    active.value = tab as (typeof VALID)[number];
-    // 切 tab 时回到顶部, 避免从长面板跳到短面板时停在中间
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-}
 </script>
 
 <style scoped lang="scss">

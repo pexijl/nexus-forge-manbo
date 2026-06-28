@@ -3,37 +3,31 @@
     <div class="sidebar-section">
       <div class="sidebar-label eyebrow">账号</div>
       <nav aria-label="个人中心导航" class="nav-list">
-        <Button
+        <router-link
+          class="profile-sidebar-nav-btn"
           v-for="tab in accountTabs"
           :key="tab.id"
-          unstyled
-          :pt="{
-            root: { class: 'profile-sidebar-nav-btn' },
-            label: 'profile-sidebar-nav-label',
-            icon: 'profile-sidebar-nav-icon',
-          }"
-          :aria-current="active === tab.id ? 'true' : 'false'"
-          @click="$emit('switch', tab.id)"
+          :to="{ name: tab.routeName }"
+          :aria-current="isActive(tab) ? 'true' : 'false'"
         >
-          <template #default>
-            <i :class="tab.icon" class="profile-sidebar-nav-icon" />
-            <span class="profile-sidebar-nav-label">{{ tab.label }}</span>
-            <span
-              v-if="tab.badge"
-              class="badge profile-sidebar-nav-badge"
-              :class="`badge-${tab.badgeVariant || 'muted'}`"
-            >
-              <span v-if="tab.badgeDot" class="badge-dot" aria-hidden="true" />
-              {{ tab.badge }}
-            </span>
-          </template>
-        </Button>
+          <i :class="tab.icon" class="profile-sidebar-nav-icon" />
+          <span class="profile-sidebar-nav-label">{{ tab.label }}</span>
+          <span
+            v-if="tab.badge"
+            class="badge profile-sidebar-nav-badge"
+            :class="`badge-${tab.badgeVariant || 'muted'}`"
+          >
+            <span v-if="tab.badgeDot" class="badge-dot" aria-hidden="true" />
+            {{ tab.badge }}
+          </span>
+        </router-link>
       </nav>
     </div>
 
     <div class="sidebar-section">
       <div class="sidebar-label eyebrow">工作区</div>
       <nav class="nav-list nav-list-workspace" aria-label="工作区">
+        <!-- TODO: 实现工作区路由链接 -->
         <Button
           v-for="link in workspaceLinks"
           :key="link.label"
@@ -56,49 +50,20 @@
 
 <script setup lang="ts">
 import Button from 'primevue/button';
+import { useRoute } from 'vue-router';
+import { accountTabs } from '../constants/profileTabs';
 
-type BadgeVariant = 'info' | 'success' | 'warn' | 'muted';
-
-defineProps<{
-  active: string;
-}>();
-
-defineEmits<{
-  (e: 'switch', tab: string): void;
-}>();
-
-const accountTabs: Array<{
-  id: string;
-  label: string;
-  icon: string;
-  badge?: string;
-  badgeVariant?: BadgeVariant;
-  badgeDot?: boolean;
-}> = [
-  { id: 'profile', label: '基础资料', icon: 'pi pi-user' },
-  { id: 'contact', label: '联系方式', icon: 'pi pi-envelope' },
-  {
-    id: 'notifications',
-    label: '通知与隐私',
-    icon: 'pi pi-bell',
-    badge: '3',
-    badgeVariant: 'muted',
-  },
-  {
-    id: 'security',
-    label: '账号安全',
-    icon: 'pi pi-shield',
-    badge: '已开启',
-    badgeVariant: 'success',
-    badgeDot: true,
-  },
-];
+const route = useRoute();
 
 const workspaceLinks: Array<{ label: string; icon: string }> = [
   { label: '团队成员', icon: 'pi pi-users' },
   { label: '账单与订阅', icon: 'pi pi-wallet' },
   { label: '集成与 API', icon: 'pi pi-sparkles' },
 ];
+
+function isActive(tab: { routeName?: string }) {
+  return route.name === tab.routeName;
+}
 </script>
 
 <style scoped lang="scss">
