@@ -111,6 +111,32 @@ public class UserService {
     }
 
     /**
+     * 移除用户头像：清空 avatarKey/avatarUrl 并删除对象存储中的文件。
+     * <p>无头像或未登录态由 controller 层判空保护。</p>
+     */
+    public UserVo removeAvatar(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
+        String oldKey = user.getAvatarKey();
+
+        // 1. 先清空 DB（保证"用户已无头像"的事实先成立）
+        user.setAvatarKey(null);
+        user.setAvatarUrl(null);
+        userRepository.save(user);
+
+        // 2. 再删旧文件（失败仅 log，不阻塞主流程）
+        if (oldKey != null && !oldKey.isBlank()) {
+            try {
+                fileClient.delete(oldKey);
+            } catch (Exception e) {
+                log.warn("删除旧头像失败, userId={}, oldKey={}", userId, oldKey, e);
+            }
+        }
+
+        return UserVo.of(user);   // 不走 toVoWithFreshUrl，因为没有 key 了
+    }
+
+    /**
      * 将 User 转换为 UserVo，并附带最新的头像访问 URL。
      *
      * @param user 用户实体

@@ -50,4 +50,9 @@ public class UserController {
     ) {
         return Result.success(userService.updateAvatar(principal.userId(), file));
     }
+
+    @DeleteMapping("/me/avatar")
+    public Result<UserVo> removeAvatar(@AuthenticationPrincipal UserPrincipal principal) {
+        return Result.success(userService.removeAvatar(principal.userId()));
+    }
 }

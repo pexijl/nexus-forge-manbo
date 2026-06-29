@@ -24,3 +24,9 @@ export function apiUploadAvatar(file: File) {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 }
+
+export function apiRemoveAvatar() {
+  return http.delete<UserInfo>('/users/me/avatar');
+}
+
+
