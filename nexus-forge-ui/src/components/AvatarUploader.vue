@@ -1,10 +1,12 @@
 <template>
-  <!-- TODO: 增加 loading 状态 -->
   <button
     class="avatar-wrapper"
     type="button"
+    :class="{ 'is-uploading': loading }"
+    :disabled="loading"
+    :aria-busy="loading"
     :aria-label="avatarUrl ? '更换头像' : '上传头像'"
-    @click="fileInput?.click()"
+    @click="handleClick"
   >
     <!-- 头像显示 -->
     <div class="avatar-display">
@@ -13,8 +15,11 @@
     </div>
     <!-- 悬浮遮罩 -->
     <div class="avatar-overlay">
-      <i class="pi pi-camera avatar-overlay__icon"></i>
-      <span class="avatar-overlay__text">更换头像</span>
+      <i v-if="loading" class="pi pi-spin pi-spinner avatar-overlay__icon"></i>
+      <template v-else>
+        <i class="pi pi-camera avatar-overlay__icon"></i>
+        <span class="avatar-overlay__text">更换头像</span>
+      </template>
     </div>
   </button>
   <!-- 隐藏的文件输入 -->
@@ -25,22 +30,32 @@
     type="file"
     accept="image/*"
     hidden
+    :disabled="loading"
     @change="onFileChange"
   />
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
-// TODO: 组件自己实现上传逻辑，或者使用第三方库（如 vue-filepond）
-defineProps<{ avatarUrl?: string }>();
+
+const props = defineProps<{
+  avatarUrl?: string;
+  loading?: boolean;
+}>();
+
 const emit = defineEmits<{ (e: 'change', file: File): void }>();
 
 const fileInput = ref<HTMLInputElement>();
 
+// 防止 loading 中重复点击触发文件选择
+const handleClick = () => {
+  if (props.loading) return;
+  fileInput.value?.click();
+};
+
 const onFileChange = (e: Event) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) emit('change', file);
-  // 清空，允许重复选择同一文件
   (e.target as HTMLInputElement).value = '';
 };
 </script>
@@ -64,6 +79,16 @@ const onFileChange = (e: Event) => {
   &:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+
+  /* loading 时禁用 hover 效果 */
+  &.is-uploading {
+    cursor: not-allowed;
+    pointer-events: none; /* 兜底，防止悬浮遮罩误触 */
+  }
+
+  &:disabled {
+    cursor: not-allowed;
   }
 }
 
@@ -126,6 +151,20 @@ const onFileChange = (e: Event) => {
   &__text {
     font-size: var(--text-sm);
     font-weight: 500;
+  }
+}
+
+/* spinner 动画（PrimeIcons 自带 pi-spin）*/
+.avatar-overlay__icon {
+  &.pi-spinner {
+    font-size: var(--text-3xl);
+    animation: pi-spin 2s linear infinite;
+  }
+}
+
+@keyframes pi-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

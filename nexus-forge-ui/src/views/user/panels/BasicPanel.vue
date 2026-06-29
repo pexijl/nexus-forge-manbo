@@ -6,7 +6,7 @@
     </div>
 
     <article class="card section-card avatar-card">
-      <AvatarUploader :avatar-url="avatarUrl" @change="onAvatarChange" />
+      <AvatarUploader :avatar-url="avatarUrl" :loading="uploading" @change="onAvatarChange" />
       <div class="avatar-meta">
         <div class="avatar-name">{{ authStore.userInfo?.nickname }}</div>
         <div class="avatar-location">注册于 {{ formatDate(authStore.userInfo?.createdAt) }}</div>
@@ -152,17 +152,36 @@ import AvatarUploader from '@/components/AvatarUploader.vue';
 import { apiUploadAvatar } from '@/api/user';
 import { useAuthStore } from '@/stores/auth';
 import { useDateFormat } from '@/composables/useDateFormat';
+import { useToast } from 'primevue/usetoast';
+import { getErrorMessage } from '@/utils/error';
 const { formatDate } = useDateFormat();
 
+const toast = useToast();
 const authStore = useAuthStore();
+const uploading = ref(false);
+
 const bio = ref('设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。');
 const bioLen = computed(() => bio.value.length);
 
 const avatarUrl = computed(() => authStore.userInfo?.avatarUrl);
 
 const onAvatarChange = async (file: File) => {
-  const userInfo = await apiUploadAvatar(file);
-  authStore.userInfo = userInfo; // 写回 store，全局同步
+  uploading.value = true;
+  try {
+    const userInfo = await apiUploadAvatar(file);
+    authStore.userInfo = userInfo; // 写回 store，全局同步
+    toast.add({ severity: 'success', summary: '头像上传成功', group: 'br', life: 3000 });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '头像上传失败',
+      detail: getErrorMessage(error),
+      group: 'br',
+      life: 3000,
+    });
+  } finally {
+    uploading.value = false;
+  }
 };
 </script>
 
