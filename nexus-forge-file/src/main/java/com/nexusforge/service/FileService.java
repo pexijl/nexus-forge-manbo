@@ -240,17 +240,20 @@ public class FileService {
         if (biz == null) {
             throw new BusinessException(ResultCode.FILE_BIZ_TYPE_IS_EMPTY);
         }
-        String prefix = switch (biz) {
+        String bizPrefix = switch (biz) {
             case AVATAR -> "avatar";
             case ATTACHMENT -> "attachment";
             case AI_IMAGE -> "ai-image";
             case WORK_EXPORT -> "work-export";
         };
-        String owner = ownerId == null ? "anon" : String.valueOf(ownerId);
+        String accessPrefix = switch (biz.defaultAccess()) {
+            case PUBLIC  -> "public";
+            case PRIVATE -> "private";
+        };
         String ext = getExtension(filename);
-        String namePart = UUID.randomUUID().toString()
-                + (ext.isEmpty() ? "" : "." + ext);
-        return String.format("%s/%s/%s", prefix, owner, namePart);
+        String owner = ownerId == null ? "anon" : String.valueOf(ownerId);
+        return String.format("%s/%s/%s/%s%s",
+                accessPrefix, bizPrefix, owner, UUID.randomUUID(), ext);
     }
 
     /**

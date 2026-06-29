@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.Duration;
 
 /**
  * 用户服务类
@@ -104,5 +105,16 @@ public class UserService {
         } catch (IOException e) {
             throw new BusinessException(ResultCode.AVATAR_UPLOAD_FAILED, e.getMessage());
         }
+    }
+
+    /**
+     * 获取用户头像的临时访问 URL，有效期 1 小时。
+     * <p>通过 {@link FileClient} 门面调用，不直接依赖存储实现。</p>
+     */
+    public String getFreshAvatarUrl(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
+        if (user.getAvatarKey() == null) return null;
+        return fileClient.issueReadUrl(user.getAvatarKey(), Duration.ofHours(1));
     }
 }

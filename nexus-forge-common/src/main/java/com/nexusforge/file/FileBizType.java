@@ -20,5 +20,12 @@ public enum FileBizType {
     /**
      * 工作区导出
      */
-    WORK_EXPORT
+    WORK_EXPORT;
+
+    public FileAccess defaultAccess() {
+        return switch (this) {
+            case AVATAR, AI_IMAGE, WORK_EXPORT -> FileAccess.PUBLIC;
+            case ATTACHMENT -> FileAccess.PRIVATE;
+        };
+    }
 }
