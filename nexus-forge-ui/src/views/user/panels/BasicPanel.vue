@@ -8,7 +8,7 @@
     <article class="card section-card avatar-card">
       <AvatarUploader :avatar-url="avatarUrl" @change="onAvatarChange" />
       <div class="avatar-meta">
-        <div class="avatar-name">林晚</div>
+        <div class="avatar-name">{{ authStore.userInfo?.nickname }}</div>
         <div class="avatar-location">注册于 2024 年 3 月 · 启明科技</div>
       </div>
       <div class="avatar-actions">
