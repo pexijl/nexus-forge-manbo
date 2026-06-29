@@ -1,12 +1,15 @@
 import { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { AuthError, BusinessError, NetworkError } from './errors';
+import { useAuthStore } from '@/stores/auth';
+
 
 export function setupInterceptors(instance: AxiosInstance) {
   // 请求拦截
   instance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
+      const authStore = useAuthStore();
       // 1. 注入 Token
-      const token = localStorage.getItem('token');
+      const token = authStore.token;
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }

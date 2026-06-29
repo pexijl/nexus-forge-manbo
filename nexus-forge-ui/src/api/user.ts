@@ -12,7 +12,7 @@ export function apiUpdateUserInfo(data: UpdateUserInfo) {
 export function apiUploadAvatar(file: File) {
   const formData = new FormData();
   formData.append('file', file);
-  return http.post<string>('/users/me/avatar', formData, {
+  return http.post<UserInfo>('/users/me/avatar', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 }

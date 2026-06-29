@@ -6,7 +6,7 @@
     </div>
 
     <article class="card section-card avatar-card">
-      <AvatarUploader :avatar-url="avatarUrl"/>
+      <AvatarUploader :avatar-url="avatarUrl" @change="onAvatarChange" />
       <div class="avatar-meta">
         <div class="avatar-name">林晚</div>
         <div class="avatar-location">注册于 2024 年 3 月 · 启明科技</div>
@@ -149,11 +149,19 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import AvatarUploader from '@/components/AvatarUploader.vue';
+import { apiUploadAvatar } from '@/api/user';
+import { useAuthStore } from '@/stores/auth';
 
+const authStore = useAuthStore();
 const bio = ref('设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。');
 const bioLen = computed(() => bio.value.length);
 
-const avatarUrl = ref('https://i.postimg.cc/7Ps7chr3/zui-hou-de-nai-long.jpg')
+const avatarUrl = computed(() => authStore.userInfo?.avatarUrl);
+
+const onAvatarChange = async (file: File) => {
+  const userInfo = await apiUploadAvatar(file);
+  authStore.userInfo = userInfo; // 写回 store，全局同步
+};
 </script>
 
 <style scoped lang="scss">
