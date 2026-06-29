@@ -24,6 +24,7 @@ public enum ResultCode {
     EMAIL_ALREADY_EXISTS(2003, "邮箱已存在"),
     REGISTRATION_FAILED(2004, "注册失败"),
     FILE_UPLOAD_FAILED(2005, "文件上传失败"),
+    FILE_TOO_LARGE(2006, "文件大小超过限制"),
     FILE_BIZ_TYPE_IS_EMPTY(2007, "文件业务类型为空"),
     AVATAR_UPLOAD_FAILED(2010, "头像上传失败");
 

@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.net.URI;
@@ -68,5 +69,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Result.fail(ResultCode.INTERNAL_ERROR));
+    }
+
+    /**
+     * 处理文件上传超限异常
+     * @param ex MaxUploadSizeExceededException
+     * @return ResponseEntity<Result<Void>>
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        long max = ex.getMaxUploadSize();
+        String msg = "文件大小超过限制" + (max > 0 ? "（最大 " + (max / 1024 / 1024) + "MB）" : "");
+        log.warn("文件上传超限: maxSize={} bytes", max);
+        return ResponseEntity
+                .status(HttpStatus.CONTENT_TOO_LARGE)   // 413
+                .body(Result.fail(ResultCode.FILE_TOO_LARGE.getCode(), msg));
     }
 }
