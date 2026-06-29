@@ -24,4 +24,5 @@ export const palette = {
   danger: makeScale('danger'),
   info: makeScale('info'),
   muted: makeScale('muted'),
+  surface: makeScale('surface'),
 };

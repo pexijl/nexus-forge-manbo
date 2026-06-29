@@ -11,12 +11,12 @@ export const semantic = {
   colorScheme: {
     light: {
       muted: palette.muted[500],
-      surface: palette.muted[50],
+      surface: palette.surface,    // ← 整个色阶
       border: palette.muted[200],
     },
     dark: {
       muted: palette.muted[400],
-      surface: palette.muted[900],
+      surface: palette.surface,    // ← 整个色阶（dark 变量自动覆盖）
       border: palette.muted[700],
     },
   },

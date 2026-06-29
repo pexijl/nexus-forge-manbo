@@ -15,6 +15,7 @@ declare module 'vue' {
     AvatarUploader: typeof import('./src/components/AvatarUploader.vue')['default']
     Badge: typeof import('primevue/badge')['default']
     Button: typeof import('primevue/button')['default']
+    ConfirmDialog: typeof import('primevue/confirmdialog')['default']
     Drawer: typeof import('primevue/drawer')['default']
     FileUpload: typeof import('primevue/fileupload')['default']
     FloatLabel: typeof import('primevue/floatlabel')['default']
