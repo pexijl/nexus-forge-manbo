@@ -53,6 +53,8 @@ const handleClick = () => {
   fileInput.value?.click();
 };
 
+defineExpose({ open: handleClick });
+
 const onFileChange = (e: Event) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) emit('change', file);

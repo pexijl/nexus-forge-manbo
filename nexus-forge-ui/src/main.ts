@@ -7,6 +7,7 @@ import './styles/main.scss';
 import { MyPreset } from './themes/index.ts';
 import { createPinia } from 'pinia';
 import ToastService from 'primevue/toastservice';
+import ConfirmationService from 'primevue/confirmationservice'; 
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate';
 import 'primeicons/primeicons.css';
 
@@ -19,6 +20,7 @@ pinia.use(piniaPluginPersistedstate);
 app.use(router);
 app.use(pinia);
 app.use(ToastService);
+app.use(ConfirmationService); 
 
 app.use(PrimeVue, {
   theme: {

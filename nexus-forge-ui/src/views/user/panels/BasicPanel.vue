@@ -6,14 +6,33 @@
     </div>
 
     <article class="card section-card avatar-card">
-      <AvatarUploader :avatar-url="avatarUrl" :loading="uploading" @change="onAvatarChange" />
+      <AvatarUploader
+        ref="avatarRef"
+        :avatar-url="avatarUrl"
+        :loading="uploading"
+        @change="onAvatarChange"
+      />
       <div class="avatar-meta">
         <div class="avatar-name">{{ authStore.userInfo?.nickname }}</div>
         <div class="avatar-location">注册于 {{ formatDate(authStore.userInfo?.createdAt) }}</div>
       </div>
       <div class="avatar-actions">
-        <Button label="更换头像" severity="primary" variant="text" size="small" />
-        <Button label="移除头像" severity="danger" variant="text" size="small" />
+        <Button
+          label="更换头像"
+          severity="primary"
+          variant="text"
+          size="small"
+          @click="avatarRef?.open()"
+        />
+        <Button
+          label="移除头像"
+          severity="danger"
+          variant="text"
+          size="small"
+          :disabled="!avatarUrl || removing"
+          :loading="removing"
+          @click="confirmRemoveAvatar"
+        />
       </div>
     </article>
 
@@ -149,16 +168,20 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import AvatarUploader from '@/components/AvatarUploader.vue';
-import { apiUploadAvatar } from '@/api/user';
+import { apiRemoveAvatar, apiUploadAvatar } from '@/api/user';
 import { useAuthStore } from '@/stores/auth';
 import { useDateFormat } from '@/composables/useDateFormat';
 import { useToast } from 'primevue/usetoast';
+import { useConfirm } from 'primevue/useconfirm';
 import { getErrorMessage } from '@/utils/error';
 const { formatDate } = useDateFormat();
 
+const confirm = useConfirm();
 const toast = useToast();
 const authStore = useAuthStore();
 const uploading = ref(false);
+const removing = ref(false);
+const avatarRef = ref<InstanceType<typeof AvatarUploader>>();
 
 const bio = ref('设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。');
 const bioLen = computed(() => bio.value.length);
@@ -181,6 +204,45 @@ const onAvatarChange = async (file: File) => {
     });
   } finally {
     uploading.value = false;
+  }
+};
+
+const confirmRemoveAvatar = () => {
+  confirm.require({
+    group: 'positioned',
+    message: '确定要移除当前头像吗？',
+    header: '移除头像',
+    icon: 'pi pi-exclamation-triangle',
+    rejectProps: {
+      label: '取消',
+      severity: 'secondary',
+    },
+    acceptProps: {
+      label: '确定',
+      severity: 'danger',
+    },
+    accept: async () => {
+      await doRemoveAvatar();
+    },
+  });
+};
+
+const doRemoveAvatar = async () => {
+  removing.value = true;
+  try {
+    const userInfo = await apiRemoveAvatar();
+    authStore.userInfo = userInfo; // avatarUrl=null 已写回 store
+    toast.add({ severity: 'success', summary: '头像已移除', group: 'br', life: 3000 });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '移除失败',
+      detail: getErrorMessage(error),
+      group: 'br',
+      life: 3000,
+    });
+  } finally {
+    removing.value = false;
   }
 };
 </script>
@@ -261,3 +323,4 @@ const onAvatarChange = async (file: File) => {
   max-width: 56ch;
 }
 </style>
+
