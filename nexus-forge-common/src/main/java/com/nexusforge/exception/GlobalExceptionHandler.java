@@ -4,7 +4,6 @@ import com.nexusforge.base.Result;
 import com.nexusforge.enums.ResultCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -14,8 +13,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
-import java.net.URI;
-import java.time.Instant;
 import java.util.stream.Collectors;
 
 /**
@@ -62,15 +59,6 @@ public class GlobalExceptionHandler {
                 .body(Result.fail(404, "请求路径不存在: " + ex.getRequestURL()));
     }
 
-    // 5. 兜底异常（必须放最后）
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<Result<Void>> handleAny(Exception ex) {
-        log.error("系统异常", ex);
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(Result.fail(ResultCode.INTERNAL_ERROR));
-    }
-
     /**
      * 处理文件上传超限异常
      * @param ex MaxUploadSizeExceededException
@@ -85,4 +73,14 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.CONTENT_TOO_LARGE)   // 413
                 .body(Result.fail(ResultCode.FILE_TOO_LARGE.getCode(), msg));
     }
+
+    // 5. 兜底异常（必须放最后）
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Result<Void>> handleAny(Exception ex) {
+        log.error("系统异常", ex);
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Result.fail(ResultCode.INTERNAL_ERROR));
+    }
+
 }
