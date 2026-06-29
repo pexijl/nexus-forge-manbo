@@ -32,8 +32,6 @@ public class UserService {
     private final FileClient fileClient;
 
     private static final char[] CHARS = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
-    private static final java.util.concurrent.ThreadLocalRandom RANDOM =
-            java.util.concurrent.ThreadLocalRandom.current();
 
     public UserVo findUserVoById(Long id) {
         User user = userRepository.findById(id)
