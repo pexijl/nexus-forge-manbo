@@ -34,7 +34,7 @@ public class UserService {
     public UserVo findUserVoById(Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
-        return UserVo.of(user);
+        return toVoWithFreshUrl(user);
     }
 
     public UserVo register(RegisterRequest req) {
@@ -72,7 +72,7 @@ public class UserService {
             user.setPhone(dto.getPhone());
         }
         userRepository.save(user);
-        return UserVo.of(user);
+        return toVoWithFreshUrl(user);
     }
 
     /**
@@ -91,7 +91,7 @@ public class UserService {
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
             String oldKey = user.getAvatarKey();
-            user.setAvatarUrl(meta.getUrl());
+            user.setAvatarUrl(meta.getUrl()); // 这里 meta.getUrl() 已经是新 URL
             user.setAvatarKey(meta.getKey());
             UserVo vo = UserVo.of(userRepository.save(user));
             if (oldKey != null && !oldKey.isBlank()) {
@@ -116,5 +116,18 @@ public class UserService {
                 .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
         if (user.getAvatarKey() == null) return null;
         return fileClient.issueReadUrl(user.getAvatarKey(), Duration.ofHours(1));
+    }
+
+    /**
+     * 将 User 转换为 UserVo，并附带最新的头像访问 URL。
+     * @param user 用户实体
+     * @return 用户视图对象
+     */
+    private UserVo toVoWithFreshUrl(User user) {
+        UserVo vo = UserVo.of(user);
+        if (user.getAvatarKey() != null) {
+            vo.setAvatarUrl(fileClient.issueReadUrl(user.getAvatarKey()));
+        }
+        return vo;
     }
 }
