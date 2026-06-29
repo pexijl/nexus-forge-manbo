@@ -2,6 +2,22 @@ import { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { AuthError, BusinessError, NetworkError } from './errors';
 import { useAuthStore } from '@/stores/auth';
 
+/**
+ * 从 axios error 中提取后端 result.message
+ * 兼容多种来源：业务 200/0 + 非业务码、HTTP 4xx/5xx 响应体
+ */
+function extractMessage(error: any, fallback: string): string {
+  // 1. 后端 Result 响应体（业务码错误）
+  if (error?.response?.data?.message) {
+    return error.response.data.message;
+  }
+  // 2. axios 自带 message
+  if (error?.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
 
 export function setupInterceptors(instance: AxiosInstance) {
   // 请求拦截
@@ -34,28 +50,54 @@ export function setupInterceptors(instance: AxiosInstance) {
         return response;
       }
 
-      // 业务错误：401 Token 过期
-      if (code === 401) {
-        return Promise.reject(new AuthError(message));
-      }
-
-      // 其他业务错误
-      return Promise.reject(new BusinessError(code, message));
+      // 业务错误
+      return Promise.reject(new BusinessError(code, message || '操作失败'));
     },
     (error) => {
-      // HTTP 层错误
-      if (error.response) {
-        const { status } = error.response;
-        if (status === 401) return Promise.reject(new AuthError('登录已过期'));
-        if (status >= 500) return Promise.reject(new NetworkError(`服务器错误 ${status}`));
+      const status = error.response?.status;
+
+      // HTTP 401：未登录 / Token 过期
+      if (status === 401) {
+        return Promise.reject(
+          new AuthError(extractMessage(error, '登录已过期，请重新登录'))
+        );
+      }
+
+      // HTTP 413：文件超限（直接透传后端 message）
+      if (status === 413) {
+        return Promise.reject(
+          new BusinessError(
+            error.response?.data?.code ?? 413,
+            extractMessage(error, '文件大小超过限制')
+          )
+        );
+      }
+
+      // HTTP 4xx 业务错误（400/403/404 等）
+      if (status && status >= 400 && status < 500) {
+        return Promise.reject(
+          new BusinessError(
+            error.response?.data?.code ?? status,
+            extractMessage(error, '请求失败')
+          )
+        );
+      }
+
+      // HTTP 5xx
+      if (status && status >= 500) {
+        return Promise.reject(
+          new NetworkError(extractMessage(error, `服务器错误 ${status}`))
+        );
       }
 
       // 网络中断 / timeout
       if (error.code === 'ECONNABORTED') {
-        return Promise.reject(new NetworkError('请求超时'));
+        return Promise.reject(new NetworkError('请求超时，请重试'));
       }
 
-      return Promise.reject(new NetworkError(error.message || '网络异常'));
+      // 其他网络错误
+      return Promise.reject(new NetworkError(extractMessage(error, '网络异常')));
     }
   );
 }
+
