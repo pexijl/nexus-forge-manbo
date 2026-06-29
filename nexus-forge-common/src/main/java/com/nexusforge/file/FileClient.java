@@ -38,6 +38,15 @@ public interface FileClient {
                                            Duration ttl);
 
     /**
+     * 颁发前端读取凭证（私有对象），默认有效期为 7 天
+     * @param key 文件key
+     * @return 读取凭证URL
+     */
+    default String issueReadUrl(String key) {
+        return issueReadUrl(key, Duration.ofDays(7));   // default TTL
+    }
+
+    /**
      * 颁发前端读取凭证（私有对象）
      *
      * @param key 文件key
