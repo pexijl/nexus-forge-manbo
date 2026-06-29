@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * 用户服务类
@@ -30,6 +30,10 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final FileClient fileClient;
+
+    private static final char[] CHARS = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
+    private static final java.util.concurrent.ThreadLocalRandom RANDOM =
+            java.util.concurrent.ThreadLocalRandom.current();
 
     public UserVo findUserVoById(Long id) {
         User user = userRepository.findById(id)
@@ -46,6 +50,7 @@ public class UserService {
         }
         User user = new User();
         user.setUsername(req.getUsername());
+        user.setNickname(generateRandomNickname());
         user.setEmail(req.getEmail());
         String encodedPassword = passwordEncoder.encode(req.getPassword());
         user.setPassword(encodedPassword);
@@ -108,18 +113,8 @@ public class UserService {
     }
 
     /**
-     * 获取用户头像的临时访问 URL，有效期 1 小时。
-     * <p>通过 {@link FileClient} 门面调用，不直接依赖存储实现。</p>
-     */
-    public String getFreshAvatarUrl(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
-        if (user.getAvatarKey() == null) return null;
-        return fileClient.issueReadUrl(user.getAvatarKey(), Duration.ofHours(1));
-    }
-
-    /**
      * 将 User 转换为 UserVo，并附带最新的头像访问 URL。
+     *
      * @param user 用户实体
      * @return 用户视图对象
      */
@@ -129,5 +124,19 @@ public class UserService {
             vo.setAvatarUrl(fileClient.issueReadUrl(user.getAvatarKey()));
         }
         return vo;
+    }
+
+    /**
+     * 生成随机昵称，格式为 "User_" + 6 位随机字母数字组合。
+     *
+     * @return 随机生成的昵称
+     */
+    private String generateRandomNickname() {
+        StringBuilder sb = new StringBuilder(11);   // "User_" + 6 位
+        sb.append("User_");
+        for (int i = 0; i < 6; i++) {
+            sb.append(CHARS[ThreadLocalRandom.current().nextInt(CHARS.length)]);
+        }
+        return sb.toString();
     }
 }
