@@ -47,6 +47,7 @@ import type { LoginRequest } from '@/types/api';
 import { useAuthStore } from '@/stores/auth';
 import { ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
+import { getErrorMessage } from '@/utils/error';
 
 const toast = useToast();
 const authStore = useAuthStore();
@@ -81,17 +82,10 @@ const handleLogin = async ({ valid, values }: FormSubmitEvent) => {
       toast.add({ severity: 'success', summary: '登录成功', group: 'br', life: 3000 });
       router.push('/');
     } catch (error) {
-      let errMsg = '登录失败，请重试';
-
-      if (error instanceof Error) {
-        errMsg = error.message;
-      } else if (typeof error === 'string') {
-        errMsg = error;
-      }
       toast.add({
         severity: 'error',
         summary: '登录失败',
-        detail: errMsg,
+        detail: getErrorMessage(error),
         group: 'br',
         life: 3000,
       });

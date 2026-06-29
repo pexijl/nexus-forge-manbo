@@ -76,6 +76,7 @@ import router from '@/router';
 import { useAuthStore } from '@/stores/auth';
 import { ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
+import { getErrorMessage } from '@/utils/error';
 
 const toast = useToast();
 const authStore = useAuthStore();
@@ -125,16 +126,10 @@ const handleRegister = async ({ valid, values }: FormSubmitEvent) => {
       toast.add({ severity: 'success', summary: '注册成功', group: 'br', life: 3000 });
       router.push({ query: { tab: 'login' } });
     } catch (error) {
-      let errMsg = '注册失败，请重试';
-      if (error instanceof Error) {
-        errMsg = error.message;
-      } else if (typeof error === 'string') {
-        errMsg = error;
-      }
       toast.add({
         severity: 'error',
         summary: '注册失败',
-        detail: errMsg,
+        detail: getErrorMessage(error),
         group: 'br',
         life: 3000,
       });
