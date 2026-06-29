@@ -9,7 +9,7 @@ spring:
     active: dev  # 默认激活 dev 环境
   mvc:
     problemdetails:
-      enabled: true # Problem Details for HTTP APIs 规范的错误响应格式
+      enabled: false # Problem Details for HTTP APIs 规范的错误响应格式
   servlet:
     multipart:
       enabled: true
