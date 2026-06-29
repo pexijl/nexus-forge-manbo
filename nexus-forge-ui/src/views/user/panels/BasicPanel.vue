@@ -9,7 +9,7 @@
       <AvatarUploader :avatar-url="avatarUrl" @change="onAvatarChange" />
       <div class="avatar-meta">
         <div class="avatar-name">{{ authStore.userInfo?.nickname }}</div>
-        <div class="avatar-location">注册于 2024 年 3 月 · 启明科技</div>
+        <div class="avatar-location">注册于 {{ formatDate(authStore.userInfo?.createdAt) }}</div>
       </div>
       <div class="avatar-actions">
         <Button label="更换头像" severity="primary" variant="text" size="small" />
@@ -151,6 +151,8 @@ import { ref, computed } from 'vue';
 import AvatarUploader from '@/components/AvatarUploader.vue';
 import { apiUploadAvatar } from '@/api/user';
 import { useAuthStore } from '@/stores/auth';
+import { useDateFormat } from '@/composables/useDateFormat';
+const { formatDate } = useDateFormat();
 
 const authStore = useAuthStore();
 const bio = ref('设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。');

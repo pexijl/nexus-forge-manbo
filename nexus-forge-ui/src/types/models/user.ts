@@ -36,6 +36,9 @@ export interface UserInfo {
   phone: string;
   status: UserStatus;
   roles: string[];
+  lastLoginAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface UpdateUserInfo {
