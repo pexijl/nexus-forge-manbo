@@ -44,6 +44,5 @@ export interface UserInfo {
 export interface UpdateUserInfo {
   email?: string;
   nickname?: string;
-  avatarUrl?: string;
   phone?: string;
 }

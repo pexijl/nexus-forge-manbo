@@ -8,7 +8,7 @@ export function apiGetUserInfo() {
 }
 
 export function apiUpdateUserInfo(data: UpdateUserInfo) {
-  return http.patch<UserInfo>('/users/me', { data });
+  return http.patch<UserInfo>('/users/me', data);
 }
 
 export function apiUploadAvatar(file: File) {
