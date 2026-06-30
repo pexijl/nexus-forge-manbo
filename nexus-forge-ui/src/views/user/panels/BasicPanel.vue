@@ -2,7 +2,6 @@
   <section class="panel is-active" aria-labelledby="h-profile">
     <div class="content-header">
       <h1 id="h-profile">基础资料</h1>
-      <p>这些信息会出现在你的公开资料页和团队成员列表中。</p>
     </div>
 
     <article class="card section-card avatar-card">
@@ -40,50 +39,80 @@
       <div class="card-header">
         <div class="card-title-block">
           <h3 class="card-title">公开资料</h3>
-          <p class="card-desc">其他人查看到的姓名、简介和链接。</p>
+          <p class="card-desc">其他人查看到的姓名、邮箱和手机号。</p>
         </div>
       </div>
 
       <div class="form-grid">
-        <label class="form-label" for="display-name">显示姓名</label>
+        <!-- 显示名称（昵称） -->
+        <label class="form-label" for="display-name">显示名称</label>
         <div class="form-control">
-          <input id="display-name" type="text" value="林晚" autocomplete="name" />
-          <p class="form-help">同事在 @ 提及和评论里会看到这个名字。</p>
+          <InputText id="display-name" v-model="form.nickname" :invalid="!!errors.nickname" fluid />
+          <p v-if="errors.nickname" class="form-help form-help--error">
+            {{ errors.nickname }}
+          </p>
+          <p v-else class="form-help">同事在 @ 提及和评论里会看到这个名字。</p>
         </div>
 
+        <!-- 用户名（只读） -->
         <label class="form-label" for="handle">用户名</label>
         <div class="form-control">
-          <div class="handle-input">
-            <span class="handle-prefix">qiming.tech/</span>
-            <input
-              id="handle"
-              class="handle-main"
-              type="text"
-              value="@linwan"
-              autocomplete="username"
-            />
-          </div>
-          <p class="form-help">修改后旧链接会在 90 天内通过 301 重定向到新地址。</p>
+          <InputText id="handle" :model-value="form.username" disabled fluid />
+          <p class="form-help">用户名用于登录，不可修改。</p>
         </div>
 
-        <label class="form-label" for="bio">个人简介</label>
+        <!-- 邮箱 -->
+        <label class="form-label" for="email">邮箱</label>
         <div class="form-control">
-          <textarea id="bio" maxlength="160">
-设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。</textarea>
-          <p class="form-help">
-            <span>{{ bioLen }}</span> / 160
+          <InputText
+            id="email"
+            v-model="form.email"
+            type="email"
+            autocomplete="email"
+            :invalid="!!errors.email"
+            @blur="validateField('email')"
+            fluid
+          />
+          <p v-if="errors.email" class="form-help form-help--error">
+            {{ errors.email }}
           </p>
+          <p v-else class="form-help">用于接收通知和找回账号。</p>
         </div>
 
-        <label class="form-label" for="website">个人主页</label>
+        <!-- 手机号 -->
+        <label class="form-label" for="phone">手机号</label>
         <div class="form-control">
-          <input id="website" type="url" placeholder="https://" value="https://linwan.design" />
+          <InputText
+            id="phone"
+            v-model="form.phone"
+            type="tel"
+            autocomplete="tel"
+            :invalid="!!errors.phone"
+            @blur="validateField('phone')"
+            placeholder="选填"
+            fluid
+          />
+          <p v-if="errors.phone" class="form-help form-help--error">
+            {{ errors.phone }}
+          </p>
+          <p v-else class="form-help">中国大陆手机号，11 位。</p>
         </div>
       </div>
 
       <div class="save-bar">
-        <button class="btn btn-ghost" type="button">放弃修改</button>
-        <button class="btn btn-primary" type="button">保存修改</button>
+        <Button
+          label="放弃修改"
+          severity="secondary"
+          variant="text"
+          :disabled="!isDirty || saving"
+          @click="resetForm"
+        />
+        <Button
+          label="保存修改"
+          :loading="saving"
+          :disabled="!isDirty || saving"
+          @click="saveProfile"
+        />
       </div>
     </article>
 
@@ -166,14 +195,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import AvatarUploader from '@/components/AvatarUploader.vue';
-import { apiRemoveAvatar, apiUploadAvatar } from '@/api/user';
+import { apiRemoveAvatar, apiUpdateUserInfo, apiUploadAvatar } from '@/api/user';
 import { useAuthStore } from '@/stores/auth';
 import { useDateFormat } from '@/composables/useDateFormat';
 import { useToast } from 'primevue/usetoast';
 import { useConfirm } from 'primevue/useconfirm';
 import { getErrorMessage } from '@/utils/error';
+import { UserStatus, type UpdateUserInfo, type UserInfo } from '@/types/models/user';
 const { formatDate } = useDateFormat();
 
 const confirm = useConfirm();
@@ -183,8 +213,104 @@ const uploading = ref(false);
 const removing = ref(false);
 const avatarRef = ref<InstanceType<typeof AvatarUploader>>();
 
-const bio = ref('设计研究员 · 关注人机交互与教育科技。 启明科技用户体验小组。');
-const bioLen = computed(() => bio.value.length);
+const form = ref<UserInfo>({
+  id: 0,
+  username: '',
+  email: '',
+  nickname: '',
+  avatarUrl: '',
+  phone: '',
+  status: UserStatus.ACTIVE,
+  roles: [],
+  lastLoginAt: '',
+  createdAt: '',
+  updatedAt: '',
+});
+const initialForm = ref<UserInfo>({ ...form.value });
+const errors = ref<Partial<Record<keyof UpdateUserInfo, string>>>({});
+const saving = ref(false);
+
+watch(
+  () => authStore.userInfo?.id, // 只看 id 变化（首次加载）
+  () => {
+    if (authStore.userInfo) {
+      form.value = { ...authStore.userInfo };
+      initialForm.value = { ...authStore.userInfo };
+    }
+  },
+  { immediate: true }
+);
+// 脏值检测
+const isDirty = computed(() => {
+  return (
+    form.value.nickname !== initialForm.value.nickname ||
+    form.value.email !== initialForm.value.email ||
+    form.value.phone !== initialForm.value.phone
+  );
+});
+
+// 字段校验（前端预校验，提交前拦一道）
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^1[3-9]\d{9}$/;
+
+function validateField(field: 'email' | 'phone' | 'nickname') {
+  errors.value[field] = undefined;
+  if (field === 'email' && form.value.email) {
+    if (!EMAIL_RE.test(form.value.email)) {
+      errors.value.email = '邮箱格式不正确';
+    }
+  }
+  if (field === 'phone' && form.value.phone) {
+    if (!PHONE_RE.test(form.value.phone)) {
+      errors.value.phone = '手机号格式不正确';
+    }
+  }
+  if (field === 'nickname' && form.value.nickname) {
+    if (form.value.nickname.length > 20) {
+      errors.value.nickname = '昵称不能超过 20 个字符';
+    }
+  }
+}
+
+async function saveProfile() {
+  // 提交前全量校验
+  validateField('nickname');
+  validateField('email');
+  validateField('phone');
+  if (Object.values(errors.value).some(Boolean)) {
+    toast.add({ severity: 'warn', summary: '请检查表单', group: 'br', life: 3000 });
+    return;
+  }
+
+  saving.value = true;
+  try {
+    // 只提交变更的字段（PATCH 语义）
+    const payload: UpdateUserInfo = {};
+    if (form.value.nickname !== initialForm.value.nickname) payload.nickname = form.value.nickname;
+    if (form.value.email !== initialForm.value.email) payload.email = form.value.email;
+    if (form.value.phone !== initialForm.value.phone) payload.phone = form.value.phone;
+
+    const userInfo = await apiUpdateUserInfo(payload);
+    authStore.userInfo = userInfo; // 写回 store
+    initialForm.value = { ...userInfo }; // 重置脏值基准
+    toast.add({ severity: 'success', summary: '保存成功', group: 'br', life: 3000 });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '保存失败',
+      detail: getErrorMessage(error),
+      group: 'br',
+      life: 3000,
+    });
+  } finally {
+    saving.value = false;
+  }
+}
+
+function resetForm() {
+  form.value = { ...initialForm.value };
+  errors.value = {};
+}
 
 const avatarUrl = computed(() => authStore.userInfo?.avatarUrl);
 
@@ -291,27 +417,6 @@ const doRemoveAvatar = async () => {
   gap: var(--space-2);
 }
 
-.handle-input {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-}
-.handle-prefix {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  background: var(--bg);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-family: var(--font-mono);
-}
-.handle-main {
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0 !important;
-  border-left: none !important;
-}
 .danger-row {
   align-items: flex-start;
   gap: var(--space-4);
@@ -322,5 +427,13 @@ const doRemoveAvatar = async () => {
   min-width: 240px;
   max-width: 56ch;
 }
+.form-help--error {
+  color: var(--error, #ef4444);
+}
 </style>
+
+
+
+
+
 
