@@ -17,6 +17,7 @@ public enum ResultCode {
     UNAUTHORIZED(1002, "未登录或登录已过期"),
     INVALID_CREDENTIALS(1003, "账号或密码错误"),
     INVALID_PARAMS(1004, "无效的参数"),
+    FORBIDDEN(1005, "无访问权限"),
 
     // 业务错误
     USER_NOT_FOUND(2001, "用户不存在"),

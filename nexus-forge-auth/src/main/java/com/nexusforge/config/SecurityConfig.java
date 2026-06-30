@@ -1,6 +1,7 @@
 package com.nexusforge.config;
 
 import com.nexusforge.filter.JwtAuthenticationFilter;
+import com.nexusforge.handler.JsonAuthHandlers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,6 +27,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
     private final CorsConfigurationSource corsConfigurationSource;
+    private final JsonAuthHandlers jsonAuthHandlers;
 
     /**
      * 配置密码编码器，使用 BCrypt 算法进行密码加密
@@ -60,6 +62,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login", "/api/auth/register").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()  // SpringDoc
                         .anyRequest().authenticated()
+                )
+                .exceptionHandling(eh -> eh
+                        .authenticationEntryPoint(jsonAuthHandlers)  // 未认证 → 401
+                        .accessDeniedHandler(jsonAuthHandlers) // 权限不足 → 403
                 )
                 // JWT 过滤器插在 UsernamePasswordAuthenticationFilter 之前
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
