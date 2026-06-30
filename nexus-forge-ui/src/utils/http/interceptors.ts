@@ -18,6 +18,9 @@ function extractMessage(error: any, fallback: string): string {
   return fallback;
 }
 
+function notifyAuthExpired(message: string) {
+  globalThis.dispatchEvent(new CustomEvent('auth:expired', { detail: message }));
+}
 
 export function setupInterceptors(instance: AxiosInstance) {
   // 请求拦截
@@ -56,10 +59,23 @@ export function setupInterceptors(instance: AxiosInstance) {
     (error) => {
       const status = error.response?.status;
 
-      // HTTP 401：未登录 / Token 过期
+      // HTTP 401：未登录 / Token 过期 → 触发登录跳转
       if (status === 401) {
+        const authStore = useAuthStore();
+        authStore.clearAuth();
+        notifyAuthExpired(extractMessage(error, '登录已过期，请重新登录'));
         return Promise.reject(
           new AuthError(extractMessage(error, '登录已过期，请重新登录'))
+        );
+      }
+
+      // HTTP 403：已登录但权限不足 → 弹 toast，不跳转
+      if (status === 403) {
+        return Promise.reject(
+          new BusinessError(
+            error.response?.data?.code ?? 403,
+            extractMessage(error, '无访问权限')
+          )
         );
       }
 
