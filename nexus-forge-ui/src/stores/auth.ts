@@ -1,9 +1,9 @@
 import { apiLogin, apiRegister } from '@/api/auth';
 import { apiGetUserInfo, apiUpdateUserInfo } from '@/api/user';
 import type { LoginRequest, RegisterRequest } from '@/types/api';
-import type { UpdateUserInfo, User, UserInfo } from '@/types/models/user';
+import type { UpdateUserInfo, UserInfo } from '@/types/models/user';
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import CryptoJS from 'crypto-js';
 
 const SECRET_KEY = import.meta.env.VITE_SECRET_KEY as string;
@@ -36,6 +36,11 @@ export const useAuthStore = defineStore(
       });
     }
 
+    function clearAuth() {
+      token.value = null;
+      userInfo.value = null;
+    }
+
     return {
       token,
       userInfo,
@@ -43,6 +48,7 @@ export const useAuthStore = defineStore(
       login,
       fetchUserInfo,
       updateUserInfo,
+      clearAuth,
     };
   },
   {
@@ -59,3 +65,5 @@ export const useAuthStore = defineStore(
     },
   }
 );
+
+
