@@ -21,7 +21,7 @@ public class CorsConfig {
         // 允许的前端源（开发环境）
         cfg.setAllowedOriginPatterns(List.of("http://localhost:*", "https://*.yourdomain.com"));
         // ⚠️ 若使用 Cookie/凭证，allowedOrigins 不能为 *，必须用 setAllowedOriginPatterns
-        cfg.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        cfg.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         cfg.setAllowedHeaders(List.of("*"));
         cfg.setAllowCredentials(true);
         cfg.setMaxAge(3600L);
