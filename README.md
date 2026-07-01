@@ -126,6 +126,71 @@ npm run dev
 
 ---
 
+## 环境变量
+
+后端配置优先从环境变量读取,**仓库中不包含任何真实凭据**。`application.yaml` 通过 `spring.config.import: optional:file:.env[.properties]` 自动加载仓库根的 `.env`(Spring Boot 3.1+)。
+
+### 本地开发
+
+1. 复制示例并填值:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 编辑 `.env`,至少修改 `DB_PASSWORD` 与 `JWT_SECRET`。`JWT_SECRET` 至少 32 字节,可用:
+
+   ```bash
+   openssl rand -base64 48
+   ```
+
+3. 启动后端:`./gradlew :nexus-forge-web:bootRun`
+
+### 必须注入的变量
+
+| 变量 | 说明 | 默认值(dev) |
+|------|------|--------------|
+| `DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC` |
+| `DB_USERNAME` | 数据库账号 | `postgres` |
+| `DB_PASSWORD` | 数据库密码 | **无,必须注入** |
+| `JWT_SECRET` | JWT 签名密钥(≥32 字节) | **无,必须注入** |
+| `JWT_TTL_MS` | JWT 有效期(毫秒) | `7200000`(2 小时) |
+| `STORAGE_VENDOR` | 存储后端:`minio` / `aliyun` / `tencent` | `minio` |
+| `MINIO_*` | MinIO 连接参数 | dev 默认 `minioadmin/minioadmin` 仅供本地 |
+| `ALIYUN_*` / `TENCENT_*` | 阿里云 OSS / 腾讯云 COS | 留空,按需填写 |
+
+> dev profile 下 `DB_PASSWORD` / `JWT_SECRET` **无默认值** —— 缺失时会启动失败,避免用空凭据静默运行。
+
+### 生产环境
+
+绝对不要把 `.env` 提交到仓库;通过以下任一方式注入:
+
+- 容器环境变量(`docker run -e` / `k8s envFrom`)
+- CI/CD Secret 配合 `envsubst` 渲染 `application-prod.yaml`
+- 配置中心(Nacos / Apollo / Spring Cloud Config)
+
+prod profile 下所有凭据均**无默认值**,缺失即启动失败。
+
+### 凭据轮换
+
+- 怀疑 JWT 泄露 → 重生成 `JWT_SECRET`,所有用户 token 立即失效,需重新登录
+- 怀疑数据库泄露 → 立即重置 `DB_PASSWORD`,并在 `application-*.yaml` 中检查是否有样例残留
+- 历史清理:仓库早期 commit 含有示例凭据(`VasyaManbo`),**视同已泄露**,必须轮换密码并视情况 `git filter-repo`
+
+### `.gitignore` 规则
+
+以下文件被仓库忽略,**不要**尝试提交它们:
+
+```
+.env
+.env.*
+!.env.example         # 例外:此文件可追踪
+**/application-local.yaml
+**/application-secret.yaml
+```
+
+---
+
 ## 已完成功能
 
 ### 认证(`nexus-forge-auth`)
