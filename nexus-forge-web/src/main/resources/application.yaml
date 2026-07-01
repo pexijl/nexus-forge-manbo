@@ -1,6 +1,8 @@
 # 通用配置文件
 
 spring:
+  config:
+    import: optional:file:.env[.properties]  # 自动读取仓库根的 .env
   application:
     name: nexus-forge
   jackson:
@@ -17,16 +19,16 @@ spring:
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
 storage:
-  vendor: minio # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
+  vendor: ${STORAGE_VENDOR:minio} # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
 
   minio:
     default:
-      endpoint: http://localhost:9000
-      region: us-east-1
-      access-key: minioadmin
-      secret-key: minioadmin
-      bucket: nexus-forge
-      path-style: true
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      region: ${MINIO_REGION:us-east-1}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}      # dev 默认仅供本地,生产必须覆盖
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}      # dev 默认仅供本地,生产必须覆盖
+      bucket: ${MINIO_BUCKET:nexus-forge}
+      path-style: ${MINIO_PATH_STYLE:true}
 
   aliyun:
     default:

@@ -2,7 +2,7 @@
 
 spring:
   datasource:
-    url: jdbc:postgresql://prod-host:5432/nexus-forge?serverTimezone=UTC
+    url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
   jpa:
@@ -13,9 +13,15 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET} # JWT的签名密钥，应该保存在安全的地方
-  ttl: 7200000 # 2小时，单位为毫秒
+  ttl: ${JWT_TTL_MS} # 2小时，单位为毫秒
   header: Authorization # 请求头中存放JWT的字段名称
-  prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证
+  prefix: Bearer # JWT的前缀，通常是Bearer Token认证
 
 storage:
-  vendor: aliyun
+  vendor: ${STORAGE_VENDOR}
+
+  # prod 严禁使用 minio 默认凭据;显式声明要求从环境变量注入
+  minio:
+    default:
+      access-key: ${MINIO_ACCESS_KEY}
+      secret-key: ${MINIO_SECRET_KEY}

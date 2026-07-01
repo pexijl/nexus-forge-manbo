@@ -2,9 +2,9 @@
 
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC # 数据库连接URL，指定时区为UTC
-    username: postgres # 数据库用户名
-    password: VasyaManbo # 数据库密码
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC} # 数据库连接URL，指定时区为UTC
+    username: ${DB_USERNAME:postgres} # 数据库用户名
+    password: ${DB_PASSWORD} # 数据库密码（dev 无默认，强制从环境变量注入）
     driver-class-name: org.postgresql.Driver # 数据库驱动类名
     hikari:
       maximum-pool-size: 20 # Hikari连接池的最大连接数
@@ -21,10 +21,10 @@ spring:
 
 
 jwt:
-  secret: "DWXnZS9hey/ILbsbNrBSeXHjRXCOMleqG9VjWN1WJiY=" # JWT的签名密钥，应该保存在安全的地方
-  ttl: 7200000 # 2小时，单位为毫秒
+  secret: ${JWT_SECRET:} # JWT的签名密钥（dev 无默认，强制从环境变量注入）
+  ttl: ${JWT_TTL_MS:7200000} # 2小时，单位为毫秒
   header: Authorization # 请求头中存放JWT的字段名称
   prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证
 
 storage:
-  vendor: minio
+  vendor: ${STORAGE_VENDOR:minio}
