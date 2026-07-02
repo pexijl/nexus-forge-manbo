@@ -18,6 +18,12 @@ spring:
       max-file-size: 5MB          # 单文件上限（头像 5MB 够用）
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) [%X{traceId:-}] %clr([%t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
+
 storage:
   vendor: ${STORAGE_VENDOR:minio} # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
 

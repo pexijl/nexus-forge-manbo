@@ -27,6 +27,8 @@ public enum ResultCode {
     FILE_UPLOAD_FAILED(2005, "文件上传失败"),
     FILE_TOO_LARGE(2006, "文件大小超过限制"),
     FILE_BIZ_TYPE_IS_EMPTY(2007, "文件业务类型为空"),
+    IDEMPOTENT_CONFLICT(2008, "幂等请求冲突"),
+    RATE_LIMITED(2009, "请求过于频繁，请稍后再试"),
     AVATAR_UPLOAD_FAILED(2010, "头像上传失败");
 
     private final Integer code;

@@ -16,6 +16,7 @@ bootJar {
 
 dependencies {
 
+    implementation project(':nexus-forge-core')
     implementation project(':nexus-forge-common')
     implementation project(':nexus-forge-user')
     implementation project(':nexus-forge-auth')

@@ -1,7 +1,8 @@
-package com.nexusforge.exception;
+package com.nexusforge.error;
 
 import com.nexusforge.base.Result;
 import com.nexusforge.enums.ResultCode;
+import com.nexusforge.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,7 +27,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(value = BusinessException.class)
     public ResponseEntity<Result<?>> handleBusinessException(BusinessException ex) {
         log.error("业务异常: code={}, message={}", ex.getCode(), ex.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Result.fail(ex.getCode(), ex.getMessage()));
+        HttpStatus status = mapStatus(ex.getCode());
+        return ResponseEntity.status(status).body(Result.fail(ex.getCode(), ex.getMessage()));
     }
 
     // 2. JSR-303校验异常(@Valid)
@@ -61,6 +63,7 @@ public class GlobalExceptionHandler {
 
     /**
      * 处理文件上传超限异常
+     *
      * @param ex MaxUploadSizeExceededException
      * @return ResponseEntity<Result<Void>>
      */
@@ -83,4 +86,12 @@ public class GlobalExceptionHandler {
                 .body(Result.fail(ResultCode.INTERNAL_ERROR));
     }
 
+    private static HttpStatus mapStatus(Integer code) {
+        if (code == null) return HttpStatus.BAD_REQUEST;
+        return switch (code) {
+            case 2008 -> HttpStatus.CONFLICT;          // IDEMPOTENT_CONFLICT  -> 409
+            case 2009 -> HttpStatus.TOO_MANY_REQUESTS; // RATE_LIMITED         -> 429
+            default -> HttpStatus.BAD_REQUEST;       // 其余业务异常          -> 400
+        };
+    }
 }

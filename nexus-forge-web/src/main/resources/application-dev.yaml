@@ -1,6 +1,11 @@
 # 开发配置文件
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC} # 数据库连接URL，指定时区为UTC
     username: ${DB_USERNAME:postgres} # 数据库用户名
