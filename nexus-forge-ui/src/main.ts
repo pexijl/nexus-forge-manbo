@@ -23,6 +23,7 @@ app.use(ToastService);
 app.use(ConfirmationService); 
 
 app.use(PrimeVue, {
+  license: import.meta.env.VITE_PRIMEVUE_LICENSE_KEY,
   theme: {
     preset: MyPreset,
     options: {
