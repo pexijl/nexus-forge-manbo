@@ -6,6 +6,7 @@ import com.nexusforge.exception.BusinessException;
 import com.nexusforge.file.FileBizType;
 import com.nexusforge.file.FileClient;
 import com.nexusforge.file.FileMeta;
+import com.nexusforge.user.dto.ChangePasswordDto;
 import com.nexusforge.user.dto.UpdateUserDto;
 import com.nexusforge.user.entity.User;
 import com.nexusforge.user.repository.UserRepository;
@@ -134,6 +135,25 @@ public class UserService {
         }
 
         return UserVo.of(user);   // 不走 toVoWithFreshUrl，因为没有 key 了
+    }
+
+    public void changePassword(Long userId, ChangePasswordDto dto) {
+        // 1. 查询用户
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
+        // 2. 校验旧密码是否正确
+        if (!passwordEncoder.matches(dto.oldPassword(), user.getPassword())) {
+            throw new BusinessException(ResultCode.OLD_PASSWORD_INCORRECT);
+        }
+        // 3. 校验新密码不能与旧密码相同
+        if (passwordEncoder.matches(dto.newPassword(), user.getPassword())) {
+            throw new BusinessException(ResultCode.NEW_PASSWORD_SAME_AS_OLD);
+        }
+        // 4. 加密新密码并保存
+        user.setPassword(passwordEncoder.encode(dto.newPassword()));
+        userRepository.save(user);
+
+        log.info("User [{}] 密码更新成功", userId);
     }
 
     /**

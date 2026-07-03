@@ -6,6 +6,7 @@ import com.nexusforge.user.dto.ChangePasswordDto;
 import com.nexusforge.user.dto.UpdateUserDto;
 import com.nexusforge.user.service.UserService;
 import com.nexusforge.user.vo.UserVo;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,9 +38,9 @@ public class UserController {
     @PostMapping("/me/password")
     public Result<Void> changePassword(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestBody ChangePasswordDto dto
+            @Valid @RequestBody ChangePasswordDto dto
     ) {
-        // TODO: 修改用户密码
+        userService.changePassword(principal.userId(), dto);
         return Result.success();
     }
 
