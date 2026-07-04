@@ -155,10 +155,10 @@
 
       <!-- 操作按钮 -->
       <div class="form-actions">
-        <Button :disabled="!canSubmit" :loading="submitting" @click="onUpdatePassword" size="small">
+        <Button severity="secondary" variant="text" @click="onCancel">取消</Button>
+        <Button :disabled="!canSubmit" :loading="submitting" @click="onUpdatePassword">
           确认修改
         </Button>
-        <Button severity="secondary" variant="text" size="small" @click="onCancel">取消</Button>
       </div>
     </article>
 
