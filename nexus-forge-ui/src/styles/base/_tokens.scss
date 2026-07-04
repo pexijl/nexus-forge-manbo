@@ -91,7 +91,7 @@
    */
 
   /* Primary (blue) */
-  --primary-50:  #eff6ff;
+  --primary-50: #eff6ff;
   --primary-100: #dbeafe;
   --primary-200: #bfdbfe;
   --primary-300: #93c5fd;
@@ -104,7 +104,7 @@
   --primary-950: #172554;
 
   /* Success (green) */
-  --success-50:  #f0fdf4;
+  --success-50: #f0fdf4;
   --success-100: #dcfce7;
   --success-200: #bbf7d0;
   --success-300: #86efac;
@@ -117,7 +117,7 @@
   --success-950: #052e16;
 
   /* Warning (amber) */
-  --warning-50:  #fffbeb;
+  --warning-50: #fffbeb;
   --warning-100: #fef3c7;
   --warning-200: #fde68a;
   --warning-300: #fcd34d;
@@ -130,7 +130,7 @@
   --warning-950: #451a03;
 
   /* Danger (red) */
-  --danger-50:  #fef2f2;
+  --danger-50: #fef2f2;
   --danger-100: #fee2e2;
   --danger-200: #fecaca;
   --danger-300: #fca5a5;
@@ -143,7 +143,7 @@
   --danger-950: #450a0a;
 
   /* Info (sky) */
-  --info-50:  #f0f9ff;
+  --info-50: #f0f9ff;
   --info-100: #e0f2fe;
   --info-200: #bae6fd;
   --info-300: #7dd3fc;
@@ -156,7 +156,7 @@
   --info-950: #082f49;
 
   /* Muted (gray) */
-  --muted-50:  #f9fafb;
+  --muted-50: #f9fafb;
   --muted-100: #f3f4f6;
   --muted-200: #e5e7eb;
   --muted-300: #d1d5db;
@@ -167,6 +167,20 @@
   --muted-800: #1f2937;
   --muted-900: #111827;
   --muted-950: #030712;
+
+  /* Surface (slate) */
+  --surface-0: #ffffff;
+  --surface-50: #f8fafc;
+  --surface-100: #f1f5f9;
+  --surface-200: #e2e8f0;
+  --surface-300: #cbd5e1;
+  --surface-400: #94a3b8;
+  --surface-500: #64748b;
+  --surface-600: #475569;
+  --surface-700: #334155;
+  --surface-800: #1e293b;
+  --surface-900: #0f172a;
+  --surface-950: #020617;
 
   /* Radius alias used by nav items / pills */
   --radius-full: var(--radius-pill);
