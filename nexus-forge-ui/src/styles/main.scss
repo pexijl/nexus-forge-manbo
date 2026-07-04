@@ -26,3 +26,65 @@ body {
 #app {
   min-height: 100vh;
 }
+
+/* ===== 路由切换动画 ===== */
+
+/* fade — 柔和淡入淡出 + 微上移 */
+.fade-enter-active {
+  transition:
+    opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.fade-leave-active {
+  transition:
+    opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+    transform 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* slide — 平滑滑动，新页面从右入、旧页面微左移 */
+.slide-enter-active {
+  transition:
+    opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.slide-leave-active {
+  transition:
+    opacity 0.2s cubic-bezier(0.4, 0, 1, 1),
+    transform 0.2s cubic-bezier(0.4, 0, 1, 1);
+}
+.slide-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+.slide-leave-to {
+  opacity: 0;
+  transform: translateX(-12px) scale(0.98);
+}
+
+/* scale — 从中心微放大，适合模态/详情页 */
+.scale-enter-active {
+  transition:
+    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.scale-leave-active {
+  transition:
+    opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+    transform 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+.scale-enter-from {
+  opacity: 0;
+  transform: scale(0.95);
+}
+.scale-leave-to {
+  opacity: 0;
+  transform: scale(1.03);
+}

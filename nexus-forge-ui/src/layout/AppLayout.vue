@@ -4,7 +4,11 @@
       <AppToolbar @toggle="layoutStore.toggleSidebar" />
     </header>
     <main class="main-content">
-      <router-view />
+      <router-view v-slot="{ Component, route }">
+        <Transition :name="route.meta.transition || 'fade'" mode="out-in">
+          <component :is="Component" :key="route.path" />
+        </Transition>
+      </router-view>
       <AppSidePanel v-model:visible="sidebarVisible">
         <template #header>
           <span>自定义面板标题</span>
