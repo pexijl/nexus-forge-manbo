@@ -10,7 +10,12 @@
 
     <div class="form-field">
       <FloatLabel>
-        <InputText name="username" id="username" v-model="registerForm.username" fluid />
+        <IconField>
+          <InputIcon>
+            <User />
+          </InputIcon>
+          <InputText name="username" id="username" v-model="registerForm.username" fluid />
+        </IconField>
         <label for="username">用户名</label>
       </FloatLabel>
       <Message v-if="$form.username?.invalid" severity="error" size="small" variant="simple">
@@ -20,7 +25,12 @@
 
     <div class="form-field">
       <FloatLabel>
-        <InputText name="email" id="email" v-model="registerForm.email" type="email" fluid />
+        <IconField>
+          <InputIcon>
+            <Envelope />
+          </InputIcon>
+          <InputText name="email" id="email" v-model="registerForm.email" type="email" fluid />
+        </IconField>
         <label for="email">邮箱</label>
       </FloatLabel>
       <Message v-if="$form.email?.invalid" severity="error" size="small" variant="simple">
@@ -30,13 +40,22 @@
 
     <div class="form-field">
       <FloatLabel>
-        <InputText
-          name="password"
-          id="password"
-          v-model="registerForm.password"
-          type="password"
-          fluid
-        />
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="password"
+            name="password"
+            v-model="registerForm.password"
+            :mask="passwordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="passwordMask = !passwordMask">
+            <Eye v-if="passwordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
         <label for="password">密码</label>
       </FloatLabel>
       <Message v-if="$form.password?.invalid" severity="error" size="small" variant="simple">
@@ -46,14 +65,22 @@
 
     <div class="form-field">
       <FloatLabel>
-        <!-- TODO: 使用增强的 密码输入框 InputPassword  -->
-        <InputText
-          name="confirmPassword"
-          id="confirmPassword"
-          v-model="registerForm.confirmPassword"
-          type="password"
-          fluid
-        />
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="confirmPassword"
+            name="confirmPassword"
+            v-model="registerForm.confirmPassword"
+            :mask="confirmPasswordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="confirmPasswordMask = !confirmPasswordMask">
+            <Eye v-if="confirmPasswordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
         <label for="confirmPassword">确认密码</label>
       </FloatLabel>
       <Message v-if="$form.confirmPassword?.invalid" severity="error" size="small" variant="simple">
@@ -71,6 +98,12 @@
 </template>
 
 <script setup lang="ts">
+import Lock from '@primeicons/vue/lock';
+import Eye from '@primeicons/vue/eye';
+import EyeSlash from '@primeicons/vue/eye-slash';
+import User from '@primeicons/vue/user';
+import Envelope from '@primeicons/vue/envelope';
+import InputPassword from 'primevue/inputpassword';
 import { zodResolver } from '@primevue/forms/resolvers/zod';
 import { z } from 'zod';
 import router from '@/router';
@@ -81,7 +114,8 @@ import { getErrorMessage } from '@/utils/error';
 
 const toast = useToast();
 const authStore = useAuthStore();
-
+const passwordMask = ref(true);
+const confirmPasswordMask = ref(true);
 const initialValues = ref({
   username: '',
   email: '',

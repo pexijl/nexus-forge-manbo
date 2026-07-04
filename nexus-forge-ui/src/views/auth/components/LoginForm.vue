@@ -9,7 +9,12 @@
     <h2 class="text-center text-2xl font-bold">登录</h2>
     <div class="form-field">
       <FloatLabel>
-        <InputText name="account" id="account" v-model="loginForm.account" fluid />
+        <IconField>
+          <InputIcon>
+            <User />
+          </InputIcon>
+          <InputText id="account" name="account" v-model="loginForm.account" fluid />
+        </IconField>
         <label for="account">用户名或邮箱</label>
       </FloatLabel>
       <Message v-if="$form.account?.invalid" severity="error" size="small" variant="simple">
@@ -18,14 +23,22 @@
     </div>
     <div class="form-field">
       <FloatLabel>
-        <!-- TODO: 使用增强的 密码输入框 InputPassword  -->
-        <InputText
-          name="password"
-          id="password"
-          v-model="loginForm.password"
-          type="password"
-          fluid
-        />
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="password"
+            name="password"
+            v-model="loginForm.password"
+            :mask="passwordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="passwordMask = !passwordMask">
+            <Eye v-if="passwordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
         <label for="password">密码</label>
       </FloatLabel>
       <Message v-if="$form.password?.invalid" severity="error" size="small" variant="simple">
@@ -41,6 +54,11 @@
 </template>
 
 <script setup lang="ts">
+import User from '@primeicons/vue/user';
+import Lock from '@primeicons/vue/lock';
+import Eye from '@primeicons/vue/eye';
+import EyeSlash from '@primeicons/vue/eye-slash';
+import InputPassword from 'primevue/inputpassword';
 import { zodResolver } from '@primevue/forms/resolvers/zod';
 import { z } from 'zod';
 import router from '@/router';
@@ -52,6 +70,7 @@ import { getErrorMessage } from '@/utils/error';
 
 const toast = useToast();
 const authStore = useAuthStore();
+const passwordMask = ref(true);
 
 const initialValues = ref<LoginRequest>({
   account: '',
