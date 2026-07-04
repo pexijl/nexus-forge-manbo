@@ -46,3 +46,8 @@ export interface UpdateUserInfo {
   nickname?: string;
   phone?: string;
 }
+
+export interface UpdatePassword {
+  oldPassword: string;
+  newPassword: string;
+}
