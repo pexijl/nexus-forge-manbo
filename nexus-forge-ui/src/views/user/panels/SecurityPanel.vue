@@ -6,23 +6,159 @@
     </div>
 
     <article class="card section-card">
-      <div class="card-header">
-        <div class="card-title-block">
-          <h3 class="card-title">登录密码</h3>
-          <p class="card-desc">上次更新于 47 天前 (2026/05/11)</p>
+      <!-- 当前密码状态 -->
+      <div class="security-status">
+        <div :class="`status-icon ${passwordStatus.level}`" id="statusIcon">
+          <!-- 安全图标 -->
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
         </div>
-        <button class="btn btn-secondary btn-sm" type="button">更改密码</button>
+        <div class="status-info">
+          <div class="status-title">当前密码安全</div>
+          <div class="status-desc" id="lastUpdated">
+            上次更新于 {{ passwordStatus.daysAgo }} 天前 ({{ passwordStatus.lastUpdated }})
+          </div>
+        </div>
       </div>
 
-      <div class="form-grid">
-        <div class="form-label">密码强度</div>
-        <div class="form-control">
-          <div class="password-strength">
-            <div class="password-bar"><div class="password-bar-fill"></div></div>
-            <span class="body-sm password-label">强</span>
-          </div>
-          <p class="form-help">包含 14 个字符 · 大小写字母、数字和符号 · 未在已知泄漏列表中出现</p>
+      <!-- 强度指示器 -->
+      <div class="strength-section">
+        <div class="strength-header">
+          <span class="strength-label">密码强度</span>
+          <span :class="`strength-value ${passwordStatus.strengthLevel}`" id="currentStrength">
+            {{ passwordStatus.strength }}
+          </span>
         </div>
+        <div class="strength-bars">
+          <div
+            v-for="(_, i) in passwordRules"
+            :key="i"
+            class="strength-bar"
+            :class="i < passedCount ? 'active ' + passwordStatus.strengthLevel : ''"
+          ></div>
+        </div>
+        <div class="strength-details" id="strengthDetails">
+          {{ passwordStatus.detail }}
+        </div>
+      </div>
+    </article>
+
+    <!-- 修改密码表单 -->
+    <article class="card section-card">
+      <div class="card-header">
+        <div class="card-title-block">
+          <h3 class="card-title">设置新密码</h3>
+          <p class="card-desc">建议使用 8 位以上，包含大小写字母、数字和符号</p>
+        </div>
+      </div>
+
+      <!-- 旧密码 -->
+      <div class="form-grid">
+        <label for="oldPassword" class="form-label">当前密码</label>
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="oldPassword"
+            name="oldPassword"
+            placeholder="请输入当前密码"
+            v-model="oldPassword"
+            :mask="oldPasswordMask"
+          />
+          <InputIcon class="cursor-pointer" @click="oldPasswordMask = !oldPasswordMask">
+            <Eye v-if="oldPasswordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
+        <div class="error-message" id="oldPasswordError">当前密码错误</div>
+      </div>
+
+      <!-- 新密码 -->
+      <div class="form-grid">
+        <label for="newPassword" class="form-label">新密码</label>
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="newPassword"
+            name="newPassword"
+            placeholder="请输入新密码"
+            v-model="newPassword"
+            :mask="newPasswordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="newPasswordMask = !newPasswordMask">
+            <Eye v-if="newPasswordMask" :size="16" />
+            <EyeSlash v-else :size="16" />
+          </InputIcon>
+        </IconField>
+        <div></div>
+        <!-- 密码规则检查（Chip 模式） -->
+        <div class="mt-3 flex flex-wrap items-center gap-1.5">
+          <Chip
+            v-for="rule in passwordRules"
+            :key="rule.label"
+            :class="
+              'border-surface-200 dark:border-surface-700 gap-1.5! border bg-transparent! px-2! py-1! text-xs! ' +
+              (rule.test(newPassword)
+                ? 'text-green-600!'
+                : 'text-surface-500! dark:text-surface-400!')
+            "
+          >
+            <span
+              :class="
+                'inline-flex size-4 items-center justify-center rounded-full ' +
+                (rule.test(newPassword)
+                  ? 'bg-green-600 text-white! dark:bg-green-600 dark:text-black'
+                  : 'bg-gray-200 text-gray-500! dark:bg-gray-300 dark:text-gray-400')
+              "
+            >
+              <Check v-if="rule.test(newPassword)" :size="12" />
+              <Times v-else :size="12" />
+            </span>
+            {{ rule.label }}
+          </Chip>
+        </div>
+      </div>
+
+      <!-- 确认密码 -->
+      <div class="form-grid">
+        <label for="confirmPassword" class="form-label">确认新密码</label>
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="confirmPassword"
+            name="confirmPassword"
+            placeholder="请再次输入新密码"
+            v-model="confirmPassword"
+            :mask="confirmPasswordMask"
+          />
+          <InputIcon class="cursor-pointer" @click="confirmPasswordMask = !confirmPasswordMask">
+            <Eye v-if="confirmPasswordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
+        <div class="error-message" id="confirmError">两次输入的密码不一致</div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="submitBtn" :disabled="!canSubmit">
+          确认修改
+        </button>
+        <button type="button" class="btn">取消</button>
       </div>
     </article>
 
@@ -116,9 +252,50 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import Check from '@primeicons/vue/check';
+import Times from '@primeicons/vue/times';
+import Lock from '@primeicons/vue/lock';
+import Chip from 'primevue/chip';
+import Eye from '@primeicons/vue/eye';
+import EyeSlash from '@primeicons/vue/eye-slash';
+import InputPassword from 'primevue/inputpassword';
+import { computed, ref } from 'vue';
 
 const on = ref(true);
+
+const oldPassword = ref('');
+const newPassword = ref('');
+const confirmPassword = ref('');
+const oldPasswordMask = ref(true);
+const newPasswordMask = ref(true);
+const confirmPasswordMask = ref(true);
+
+const passwordRules = [
+  { label: '至少 8 个字符', test: (v: string) => v.length >= 8 },
+  // { label: '包含大写字母', test: (v: string) => /[A-Z]/.test(v) },
+  { label: '包含小写字母', test: (v: string) => /[a-z]/.test(v) },
+  // { label: '包含数字', test: (v: string) => /\d/.test(v) },
+  // { label: '包含特殊符号', test: (v: string) => /[^a-zA-Z0-9]/.test(v) },
+];
+
+const allRulesPass = computed(() => passwordRules.every((r) => r.test(newPassword.value)));
+const passwordMatch = computed(
+  () => newPassword.value.length > 0 && newPassword.value === confirmPassword.value
+);
+const oldPasswordFilled = computed(() => oldPassword.value.length > 0);
+const canSubmit = computed(
+  () => allRulesPass.value && passwordMatch.value && oldPasswordFilled.value
+);
+const passedCount = computed(() => passwordRules.filter((r) => r.test(newPassword.value)).length);
+
+const passwordStatus = ref({
+  level: 'safe' as 'safe' | 'warning' | 'danger',
+  lastUpdated: '2026-05-11',
+  daysAgo: 47,
+  strength: '强',
+  strengthLevel: 'strong' as 'weak' | 'fair' | 'good' | 'strong',
+  detail: '包含 14 个字符 · 大小写字母、数字和符号 · 未在已知泄露列表中出现',
+});
 
 const devices = [
   {
@@ -168,32 +345,303 @@ const loginLogs = [
 </script>
 
 <style scoped lang="scss">
-.password-strength {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.password-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--border);
-  overflow: hidden;
-}
-.password-bar-fill {
-  width: 75%;
-  height: 100%;
-  background: var(--success);
-}
-.password-label {
-  font-weight: 500;
-  color: var(--success);
-}
 .last-active {
   margin-right: var(--space-2);
   white-space: nowrap;
 }
 .current-badge {
   font-weight: 400;
+}
+
+/* 当前密码状态卡片 */
+.security-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.status-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.status-icon.safe {
+  background: #f0f9eb;
+  color: #67c23a;
+}
+
+.status-icon.warning {
+  background: #fdf6ec;
+  color: #e6a23c;
+}
+
+.status-icon.danger {
+  background: #fef0f0;
+  color: #f56c6c;
+}
+
+.status-info {
+  flex: 1;
+}
+
+.status-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.status-desc {
+  font-size: 13px;
+  color: #8c8c8c;
+}
+
+/* 强度指示器 */
+.strength-section {
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.strength-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.strength-label {
+  font-size: 14px;
+  color: #595959;
+}
+
+.strength-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.strength-value.strong {
+  color: #67c23a;
+}
+
+.strength-value.good {
+  color: #409eff;
+}
+
+.strength-value.fair {
+  color: #e6a23c;
+}
+
+.strength-value.weak {
+  color: #f56c6c;
+}
+
+/* 分段进度条 */
+.strength-bars {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.strength-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #e8e8e8;
+  transition: all 0.3s ease;
+}
+
+.strength-bar.active.weak {
+  background: #f56c6c;
+}
+
+.strength-bar.active.fair {
+  background: #e6a23c;
+}
+
+.strength-bar.active.good {
+  background: #409eff;
+}
+
+.strength-bar.active.strong {
+  background: #67c23a;
+}
+
+.strength-details {
+  font-size: 13px;
+  color: #8c8c8c;
+  line-height: 1.8;
+}
+
+.form-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 44px 0 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  font-size: 15px;
+  color: #1a1a1a;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.form-input:hover {
+  border-color: #bfbfbf;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #409eff;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.1);
+}
+
+.form-input.error {
+  border-color: #f56c6c;
+  box-shadow: 0 0 0 3px rgba(245, 108, 108, 0.1);
+}
+
+.form-input.success {
+  border-color: #67c23a;
+  box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.1);
+}
+
+.toggle-password {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8c8c8c;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.toggle-password:hover {
+  background: #f5f5f5;
+  color: #595959;
+}
+
+.error-message {
+  font-size: 13px;
+  color: #f56c6c;
+  margin-top: 6px;
+  display: none;
+}
+
+.error-message.show {
+  display: block;
+}
+
+/* 操作按钮 */
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.hint-text {
+  font-size: 13px;
+  color: #8c8c8c;
+  margin-top: 6px;
+}
+
+/* 新密码强度实时预览 */
+.live-strength {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  display: none;
+}
+
+.live-strength.show {
+  display: block;
+}
+
+.live-strength-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.live-strength-label {
+  font-size: 13px;
+  color: #595959;
+}
+
+.live-strength-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.live-strength-bars {
+  display: flex;
+  gap: 4px;
+}
+
+.live-strength-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: #e8e8e8;
+  transition: all 0.3s;
+}
+
+/* 密码规则列表 */
+.password-rules {
+  margin-top: 16px;
+  padding: 16px;
+  background: #fafafa;
+  border-radius: 8px;
+}
+
+.rule-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #8c8c8c;
+  margin-bottom: 10px;
+  transition: all 0.3s;
+}
+
+.rule-item:last-child {
+  margin-bottom: 0;
+}
+
+.rule-item.valid {
+  color: #67c23a;
+}
+
+.rule-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  background: #e8e8e8;
+  color: #bfbfbf;
+  transition: all 0.3s;
+}
+
+.rule-item.valid .rule-icon {
+  background: #f0f9eb;
+  color: #67c23a;
 }
 </style>
