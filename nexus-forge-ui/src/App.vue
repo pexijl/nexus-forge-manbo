@@ -1,5 +1,3 @@
-<script setup lang="ts"></script>
-
 <template>
   <Toast position="top-left" group="tl" />
   <Toast position="top-right" group="tr" />
