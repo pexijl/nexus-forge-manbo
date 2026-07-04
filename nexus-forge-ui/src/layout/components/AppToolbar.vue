@@ -6,13 +6,50 @@
     </div>
     <!-- 右侧：操作区 -->
     <div class="toolbar-right">
-      <Button icon="pi pi-user" variant="text" @click="router.push({ name: 'profile-view' })" />
+      <Avatar
+        class="toolbar-avatar"
+        :image="authStore.userInfo?.avatarUrl"
+        shape="circle"
+        size="large"
+        @click="onAvatarClick"
+      />
+      <!-- 弹出框 -->
+      <Popover ref="avatarPopover">
+        <div class="">
+          <div class="flex flex-col gap-2">
+            <Button text @click="onProfileClick">个人主页</Button>
+            <Button text severity="danger" @click="onLogoutClick">退出登录</Button>
+          </div>
+        </div>
+      </Popover>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import router from '@/router';
+import { useAuthStore } from '@/stores/auth';
+import type Popover from 'primevue/popover';
+import { ref } from 'vue';
+
+const authStore = useAuthStore();
+
+const avatarPopover = ref<InstanceType<typeof Popover> | null>(null);
+
+const onAvatarClick = (e: Event) => {
+  avatarPopover.value?.toggle(e);
+};
+
+const onProfileClick = () => {
+  router.push('/profile');
+  avatarPopover.value?.hide();
+};
+
+const onLogoutClick = async () => {
+  await authStore.logout();
+  router.push('/login');
+  avatarPopover.value?.hide();
+};
 
 const emit = defineEmits<{
   (e: 'toggle'): void;
@@ -41,5 +78,19 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.toolbar-avatar {
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+
+  &:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent), transparent 60%);
+    filter: brightness(1.05);
+  }
 }
 </style>

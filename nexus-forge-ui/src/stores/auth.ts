@@ -1,10 +1,11 @@
-import { apiLogin, apiRegister } from '@/api/auth';
+import { apiLogin, apiLogout, apiRegister } from '@/api/auth';
 import { apiGetUserInfo, apiUpdateUserInfo } from '@/api/user';
 import type { LoginRequest, RegisterRequest } from '@/types/api';
 import type { UpdateUserInfo, UserInfo } from '@/types/models/user';
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import CryptoJS from 'crypto-js';
+import router from '@/router';
 
 /**
  * AES 加解密密钥，用于 Pinia persist 插件对 localStorage 中的 token 和 userInfo 进行加密存储。
@@ -23,9 +24,21 @@ export const useAuthStore = defineStore(
     }
 
     async function login(req: LoginRequest) {
-      await apiLogin(req).then((res) => {
-        token.value = res.token;
-      });
+      const res = await apiLogin(req);
+      token.value = res.token;
+      // 登录成功后立即拉取用户信息，确保 toolbar 头像等全局组件可用
+      await fetchUserInfo();
+    }
+
+    async function logout() {
+      try {
+        // TODO: 未来可能需要通知服务端
+        await apiLogout();
+      } catch {
+        // 即使服务端注销失败，前端也要清除状态
+      }
+      clearAuth();
+      router.push({ name: 'auth-view', query: { tab: 'login' } });
     }
 
     async function fetchUserInfo() {
@@ -53,6 +66,7 @@ export const useAuthStore = defineStore(
       fetchUserInfo,
       updateUserInfo,
       clearAuth,
+      logout,
     };
   },
   {

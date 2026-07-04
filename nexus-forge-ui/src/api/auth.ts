@@ -18,3 +18,11 @@ export const apiRegister = (data: RegisterRequest) => {
 export const apiLogin = (data: LoginRequest) => {
   return request.post<{ token: string }>('/auth/login', data);
 };
+
+/**
+ * 用户登出接口
+ * @returns Promise<void>
+ */
+export const apiLogout = () => {
+  // TODO: 未来可能需要通知服务端
+}
