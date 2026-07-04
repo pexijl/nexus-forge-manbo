@@ -155,10 +155,10 @@
 
       <!-- 操作按钮 -->
       <div class="form-actions">
-        <button type="button" class="btn btn-primary" id="submitBtn" :disabled="!canSubmit">
+        <Button :disabled="!canSubmit" :loading="submitting" @click="onUpdatePassword" size="small">
           确认修改
-        </button>
-        <button type="button" class="btn">取消</button>
+        </Button>
+        <Button severity="secondary" variant="text" size="small" @click="onCancel">取消</Button>
       </div>
     </article>
 
@@ -260,6 +260,11 @@ import Eye from '@primeicons/vue/eye';
 import EyeSlash from '@primeicons/vue/eye-slash';
 import InputPassword from 'primevue/inputpassword';
 import { computed, ref } from 'vue';
+import { apiUpdatePassword } from '@/api/user';
+import { useToast } from 'primevue/usetoast';
+import { getErrorMessage } from '@/utils/error';
+
+const toast = useToast();
 
 const on = ref(true);
 
@@ -269,6 +274,7 @@ const confirmPassword = ref('');
 const oldPasswordMask = ref(true);
 const newPasswordMask = ref(true);
 const confirmPasswordMask = ref(true);
+const submitting = ref(false);
 
 const passwordRules = [
   { label: '至少 8 个字符', test: (v: string) => v.length >= 8 },
@@ -284,7 +290,7 @@ const passwordMatch = computed(
 );
 const oldPasswordFilled = computed(() => oldPassword.value.length > 0);
 const canSubmit = computed(
-  () => allRulesPass.value && passwordMatch.value && oldPasswordFilled.value
+  () => !submitting.value && allRulesPass.value && passwordMatch.value && oldPasswordFilled.value
 );
 const passedCount = computed(() => passwordRules.filter((r) => r.test(newPassword.value)).length);
 
@@ -296,6 +302,45 @@ const passwordStatus = ref({
   strengthLevel: 'strong' as 'weak' | 'fair' | 'good' | 'strong',
   detail: '包含 14 个字符 · 大小写字母、数字和符号 · 未在已知泄露列表中出现',
 });
+
+const resetPasswordForm = () => {
+  oldPassword.value = '';
+  newPassword.value = '';
+  confirmPassword.value = '';
+};
+
+const onUpdatePassword = async () => {
+  submitting.value = true;
+  try {
+    await apiUpdatePassword({
+      oldPassword: oldPassword.value,
+      newPassword: newPassword.value,
+    });
+    // 成功后清空表单
+    resetPasswordForm();
+    // 刷新状态卡
+    passwordStatus.value = {
+      ...passwordStatus.value,
+      daysAgo: 0,
+      lastUpdated: new Date().toISOString().slice(0, 10),
+    };
+    toast.add({ severity: 'success', summary: '密码更新成功', group: 'br', life: 3000 });
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '保存失败',
+      detail: getErrorMessage(error),
+      group: 'br',
+      life: 3000,
+    });
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const onCancel = () => {
+  resetPasswordForm();
+};
 
 const devices = [
   {
