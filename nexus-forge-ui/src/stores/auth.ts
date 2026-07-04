@@ -6,6 +6,10 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import CryptoJS from 'crypto-js';
 
+/**
+ * AES 加解密密钥，用于 Pinia persist 插件对 localStorage 中的 token 和 userInfo 进行加密存储。
+ * 该密钥从环境变量 VITE_SECRET_KEY 中读取，需在 .env 文件中配置。
+ */
 const SECRET_KEY = import.meta.env.VITE_SECRET_KEY as string;
 
 export const useAuthStore = defineStore(
@@ -65,5 +69,3 @@ export const useAuthStore = defineStore(
     },
   }
 );
-
-
