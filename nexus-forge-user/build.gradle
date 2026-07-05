@@ -13,6 +13,7 @@ repositories {
 dependencies {
     implementation project(':nexus-forge-common')
     implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
 
     // 单元测试：JUnit 5 + Mockito + AssertJ + Spring Test 一次拿齐
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

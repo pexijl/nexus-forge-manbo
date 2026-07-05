@@ -14,6 +14,7 @@ repositories {
 dependencies {
 
     implementation project(':nexus-forge-common')
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
 
     implementation platform('software.amazon.awssdk:bom:2.46.16')
     implementation("software.amazon.awssdk:s3")
