@@ -9,6 +9,7 @@
       <Avatar
         class="toolbar-avatar"
         :image="authStore.userInfo?.avatarUrl"
+        :icon="authStore.userInfo?.avatarUrl ? undefined : 'pi pi-user'"
         shape="circle"
         size="large"
         @click="onAvatarClick"
