@@ -37,7 +37,6 @@ public class Result<T> {
      * @param data 返回数据
      */
     public static <T> Result<T> success(String message, T data) {
-        // TODO: 200 -> constant
         return Result.<T>builder().code(ResultCode.SUCCESS.getCode()).message(message).data(data).build();
     }
 
@@ -46,7 +45,6 @@ public class Result<T> {
      * @param message 错误信息
      */
     public static <T> Result<T> fail(String message) {
-        // TODO: 500 -> constant
         return Result.<T>builder().code(ResultCode.FAIL.getCode()).message(message).build();
     }
 
