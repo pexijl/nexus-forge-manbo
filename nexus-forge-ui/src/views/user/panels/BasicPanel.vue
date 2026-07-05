@@ -16,18 +16,11 @@
         <div class="avatar-location">注册于 {{ formatDate(authStore.userInfo?.createdAt) }}</div>
       </div>
       <div class="avatar-actions">
-        <Button
-          label="更换头像"
-          severity="primary"
-          variant="text"
-          size="small"
-          @click="avatarRef?.open()"
-        />
+        <Button label="更换头像" severity="primary" variant="text" @click="avatarRef?.open()" />
         <Button
           label="移除头像"
           severity="danger"
           variant="text"
-          size="small"
           :disabled="!avatarUrl || removing"
           :loading="removing"
           @click="confirmRemoveAvatar"
@@ -431,9 +424,3 @@ const doRemoveAvatar = async () => {
   color: var(--error, #ef4444);
 }
 </style>
-
-
-
-
-
-
