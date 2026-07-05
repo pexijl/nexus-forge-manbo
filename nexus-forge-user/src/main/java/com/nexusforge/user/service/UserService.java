@@ -66,8 +66,8 @@ public class UserService {
         if (dto.getAvatarUrl() != null) {
             user.setAvatarUrl(dto.getAvatarUrl());
         }
-        if (dto.getEmail() != null) {
-            if (userRepository.existsByEmail(dto.getEmail())) {
+        if (dto.getEmail() != null && !dto.getEmail().equals(user.getEmail())) {
+            if (userRepository.existsByEmailAndIdNot(dto.getEmail(), userId)) {
                 throw new BusinessException(ResultCode.EMAIL_ALREADY_EXISTS);
             }
             user.setEmail(dto.getEmail());
