@@ -1,0 +1,72 @@
+package com.nexusforge.user.support;
+
+import com.nexusforge.enums.Role;
+import com.nexusforge.enums.UserStatus;
+import com.nexusforge.file.FileClient;
+import com.nexusforge.user.entity.User;
+import com.nexusforge.user.repository.UserRepository;
+import com.nexusforge.user.service.UserService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.util.HashSet;
+import java.util.Set;
+
+/**
+ * UserService 单元测试基类
+ *
+ * 设计要点：
+ * - @Mock 注入 UserRepository / FileClient
+ * - PasswordEncoder 用真实 BCryptPasswordEncoder（验证哈希链没断）
+ * - 不使用 @InjectMocks（因为构造器需要 PasswordEncoder，但它是真实对象不是 mock）
+ *   改在 @BeforeEach 里手动 new UserService(mock repo, real encoder, mock fileClient)
+ */
+@ExtendWith(MockitoExtension.class)
+public abstract class UserServiceTestSupport {
+
+    @Mock
+    protected UserRepository userRepository;
+
+    @Mock
+    protected FileClient fileClient;
+
+    /**
+     * 真实 BCryptPasswordEncoder，让 passwordEncoder.matches / encode 走真逻辑
+     */
+    protected final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    /**
+     * 手动构造，绕开 @InjectMocks 只能填 mock 的限制
+     */
+    protected UserService userService;
+
+    @BeforeEach
+    void initUserService() {
+        userService = new UserService(userRepository, passwordEncoder, fileClient);
+    }
+
+    // ---------------- 工厂方法（保持原样） ----------------
+
+    protected User existingUser(Long id) {
+        User u = new User();
+        u.setId(id);
+        u.setUsername("alice");
+        u.setEmail("alice@example.com");
+        u.setNickname("Alice");
+        u.setPassword(passwordEncoder.encode("oldPass123"));
+        u.setStatus(UserStatus.ACTIVE);
+        u.setRoles(defaultRoles());
+        return u;
+    }
+
+    protected Set<Role> defaultRoles() {
+        Set<Role> roles = new HashSet<>();
+        roles.add(Role.USER);
+        return roles;
+    }
+
+}
