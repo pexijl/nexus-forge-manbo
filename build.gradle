@@ -49,8 +49,14 @@ subprojects {
 	}
 
 	dependencies {
+		// Lombok 注解处理器（编译时依赖）
 		compileOnly 'org.projectlombok:lombok'
 		annotationProcessor 'org.projectlombok:lombok'
+
+		// Lombok 测试注解处理器（测试编译时依赖）
+		testCompileOnly 'org.projectlombok:lombok'
+		testAnnotationProcessor 'org.projectlombok:lombok'
+
 		developmentOnly "org.springframework.boot:spring-boot-devtools"
 		testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	}
