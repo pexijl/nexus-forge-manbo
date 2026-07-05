@@ -19,6 +19,33 @@ spring:
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
 
+springdoc:
+  swagger-ui:
+    # UI 路径：http://localhost:8080/swagger-ui/index.html
+    path: /swagger-ui/index.html
+    enabled: true
+    # 在 UI 里按 HTTP method 排序
+    operations-sorter: method
+    tags-sorter: alpha
+    # 启用 "Try it out" 按钮
+    try-it-out-enabled: true
+    # 显示请求/响应时长
+    display-request-duration: true
+    # 持久化认证信息（填了 Bearer token 不会刷新丢）
+    persist-authorization: true
+  # 扫描所有带 @RestController 的包
+  packages-to-scan: com.nexusforge
+  # 启动时输出文档生成日志（dev profile 开启方便调试）
+  show-actuator: false
+  # 默认分组
+  group-configs:
+    - group: 'public'
+      paths-to-match: '/api/auth/**'
+    - group: 'user'
+      paths-to-match: '/api/users/**'
+    - group: 'file'
+      paths-to-match: '/api/files/**'
+
 logging:
   pattern:
     level: "%5p [%X{traceId:-}]"
