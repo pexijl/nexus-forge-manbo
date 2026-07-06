@@ -61,13 +61,15 @@ import EyeSlash from '@primeicons/vue/eye-slash';
 import InputPassword from 'primevue/inputpassword';
 import { zodResolver } from '@primevue/forms/resolvers/zod';
 import { z } from 'zod';
-import router from '@/router';
-import type { LoginRequest } from '@/types/api';
+import type { LoginRequest } from '@/types/auth';
 import { useAuthStore } from '@/stores/auth';
 import { ref } from 'vue';
 import { useToast } from 'primevue/usetoast';
 import { getErrorMessage } from '@/utils/error';
+import { useRoute, useRouter } from 'vue-router';
 
+const route = useRoute();
+const router = useRouter();
 const toast = useToast();
 const authStore = useAuthStore();
 const passwordMask = ref(true);
@@ -96,21 +98,21 @@ interface FormSubmitEvent {
 }
 
 const handleLogin = async ({ valid, values }: FormSubmitEvent) => {
-  if (valid) {
-    try {
-      await authStore.login(values as LoginRequest);
-      toast.add({ severity: 'success', summary: '登录成功', group: 'br', life: 3000 });
-      router.push('/');
-    } catch (error) {
-      toast.add({
-        severity: 'error',
-        summary: '登录失败',
-        detail: getErrorMessage(error),
-        group: 'br',
-        life: 3000,
-      });
-    } finally {
-    }
+  if (!valid) return;
+  try {
+    await authStore.login(values as LoginRequest);
+    toast.add({ severity: 'success', summary: '登录成功', life: 3000 });
+    const raw = route.query.redirect;
+    const candidate = Array.isArray(raw) ? raw[0] : raw;
+    const safe = candidate && /^\/(?!\/)/.test(candidate) ? candidate : '/';
+    router.replace(safe); // 使用 replace 避免登录后返回到登录页
+  } catch (error) {
+    toast.add({
+      severity: 'error',
+      summary: '登录失败',
+      detail: getErrorMessage(error),
+      life: 3000,
+    });
   }
 };
 const switchToRegister = () => {

@@ -21,37 +21,3 @@ export interface RequestConfig {
    */
   retry?: number;
 }
-
-// 认证相关类型, TODO: 未来可以考虑将这些类型拆分到单独的文件中
-
-/**
- * 登录请求参数接口
- */
-export interface LoginRequest {
-  /**
-   * 用户名或邮箱
-   */
-  account: string;
-  /**
-   * 密码
-   */
-  password: string;
-}
-
-/**
- * 注册请求参数接口
- */
-export interface RegisterRequest {
-  /**
-   * 用户名
-   */
-  username: string;
-  /**
-   * 邮箱
-   */
-  email: string;
-  /**
-   * 密码
-   */
-  password: string;
-}

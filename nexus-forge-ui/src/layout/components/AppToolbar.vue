@@ -47,8 +47,7 @@ const onProfileClick = () => {
 };
 
 const onLogoutClick = async () => {
-  await authStore.logout();
-  router.push('/login');
+  await authStore.logout(); // store 内部已经跳了
   avatarPopover.value?.hide();
 };
 

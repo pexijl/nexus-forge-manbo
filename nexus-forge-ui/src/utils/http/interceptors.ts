@@ -2,18 +2,26 @@ import { type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 import { AuthError, BusinessError, NetworkError } from './errors';
 import { useAuthStore } from '@/stores/auth';
 
+// 不需要 token 的端点（白名单前缀）
+const PUBLIC_PREFIXES = ['/auth/login', '/auth/register', '/auth/refresh'];
+const PUBLIC_SET = new Set(PUBLIC_PREFIXES);
+
+function isPublicEndpoint(url?: string): boolean {
+  if (!url) return false;
+  const path = url.split('?')[0];
+  return PUBLIC_SET.has(path);   // 使用精确路径的 Set
+}
+
 /**
  * 从 axios error 中提取后端 result.message
  * 兼容多种来源：业务 200/0 + 非业务码、HTTP 4xx/5xx 响应体
  */
-function extractMessage(error: any, fallback: string): string {
-  // 1. 后端 Result 响应体（业务码错误）
-  if (error?.response?.data?.message) {
-    return error.response.data.message;
-  }
-  // 2. axios 自带 message
-  if (error?.message) {
-    return error.message;
+function extractMessage(error: unknown, fallback: string): string {
+  if (error && typeof error === 'object') {
+    const e = error as { response?: { data?: { message?: unknown } }; message?: unknown };
+    const fromBody = e.response?.data?.message;
+    if (typeof fromBody === 'string') return fromBody;
+    if (typeof e.message === 'string') return e.message;
   }
   return fallback;
 }
@@ -23,17 +31,22 @@ function notifyAuthExpired(message: string) {
 }
 
 export function setupInterceptors(instance: AxiosInstance) {
-  // 请求拦截
+  // -------- 请求拦截 --------
   instance.interceptors.request.use(
-    (config: InternalAxiosRequestConfig) => {
+    async (config: InternalAxiosRequestConfig) => {
       const authStore = useAuthStore();
-      // 1. 注入 Token
-      const token = authStore.token;
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // 公开接口不打 token
+      if (isPublicEndpoint(config.url)) {
+        return config;
       }
 
-      // 2. GET 请求注入时间戳（防 IE 缓存）
+      // 拿到一个新鲜 access（快过期就主动 refresh）
+      const fresh = await authStore.ensureFreshAccess();
+      if (fresh && config.headers) {
+        config.headers.Authorization = `Bearer ${fresh}`;
+      }
+
+      //  GET 请求注入时间戳（防 IE 缓存）
       if (config.method === 'get') {
         config.params = { ...config.params, _t: Date.now() };
       }
@@ -43,33 +56,50 @@ export function setupInterceptors(instance: AxiosInstance) {
     (error) => Promise.reject(error)
   );
 
-  // 响应拦截
+  // -------- 响应拦截 --------
   instance.interceptors.response.use(
     (response) => {
-      const { code, message, data } = response.data;
-
+      const { code, message } = response.data;
       // 业务成功（约定 code 0 或 200 为成功）
-      if (code === 0 || code === 200) {
-        return response;
-      }
-
+      if (code === 0 || code === 200) return response;
       // 业务错误
       return Promise.reject(new BusinessError(code, message || '操作失败'));
     },
-    (error) => {
+    async (error) => {
+      // 获取原始请求配置，并标记是否已重试（防止死循环）
+      const original = error.config as InternalAxiosRequestConfig & {
+        _retry?: boolean;
+      };
+      // 提取 HTTP 状态码
       const status = error.response?.status;
+      // 获取认证 Store 实例（用于刷新 Token 或清除登录态）
+      const authStore = useAuthStore();
 
-      // HTTP 401：未登录 / Token 过期 → 触发登录跳转
-      if (status === 401) {
-        const authStore = useAuthStore();
+      // 仅对业务接口做;refresh 接口本身失败走原本的登出流程
+      if (status === 401 && !original._retry && !isPublicEndpoint(original.url)) {
+        original._retry = true;
+
+        const fresh = await authStore.ensureFreshAccess();
+        if (fresh) {
+          // 用新 access 重发原请求
+          original.headers!.Authorization = `Bearer ${fresh}`;
+          return instance.request(original);
+        }
+
+        // refresh 也挂了 → 登出
+        const message = extractMessage(error, '登录已过期，请重新登录');
         authStore.clearAuth();
-        notifyAuthExpired(extractMessage(error, '登录已过期，请重新登录'));
-        return Promise.reject(
-          new AuthError(extractMessage(error, '登录已过期，请重新登录'))
-        );
+        notifyAuthExpired(message);
+        return Promise.reject(new AuthError(message));
       }
 
-      // HTTP 403：已登录但权限不足 → 弹 toast，不跳转
+      // -------- 401 但已经是 refresh 接口本身 --------
+      if (status === 401 && isPublicEndpoint(original.url)) {
+        const message = extractMessage(error, '登录已过期，请重新登录');
+        authStore.clearAuth();
+        notifyAuthExpired(message);
+        return Promise.reject(new AuthError(message));
+      }
       if (status === 403) {
         return Promise.reject(
           new BusinessError(
