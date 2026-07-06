@@ -27,9 +27,13 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET:} # JWT的签名密钥（dev 无默认，强制从环境变量注入）
-  ttl: ${JWT_TTL_MS:7200000} # 2小时，单位为毫秒
+  access-ttl: ${JWT_ACCESS_TTL_MS:900000} # JWT访问令牌的有效期，单位为毫秒（默认15分钟）
+  refresh-ttl: ${JWT_REFRESH_TTL_MS:604800000} # JWT刷新令牌的有效期，单位为毫秒（默认7天）
   header: Authorization # 请求头中存放JWT的字段名称
   prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证
+  enable-blacklist: true # 是否启用JWT黑名单功能，防止已注销的令牌被继续使用
+  blacklist-prefix: 'auth:blacklist:' # JWT黑名单在Redis中的前缀，方便区分其他数据
+  refresh-prefix: 'auth:refresh:' # JWT刷新令牌在Redis中的前缀，方便区分其他数据
 
 storage:
   vendor: ${STORAGE_VENDOR:minio}

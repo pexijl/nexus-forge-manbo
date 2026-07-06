@@ -28,13 +28,19 @@ public class JsonAuthHandlers implements AuthenticationEntryPoint, AccessDeniedH
     private final ObjectMapper objectMapper;
 
     @Override
-    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException, ServletException {
+    public void commence(HttpServletRequest request,
+                         HttpServletResponse response,
+                         AuthenticationException authException
+    ) throws IOException, ServletException {
         writeJson(response, HttpServletResponse.SC_UNAUTHORIZED,
                 Result.fail(ResultCode.UNAUTHORIZED, "登录已过期或未登录"));
     }
 
     @Override
-    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException) throws IOException, ServletException {
+    public void handle(HttpServletRequest request,
+                       HttpServletResponse response,
+                       AccessDeniedException accessDeniedException
+    ) throws IOException, ServletException {
         writeJson(response, HttpServletResponse.SC_FORBIDDEN,
                 Result.fail(ResultCode.FORBIDDEN, "无访问权限"));
     }

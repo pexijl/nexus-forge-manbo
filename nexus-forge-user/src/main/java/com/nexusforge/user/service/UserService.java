@@ -2,6 +2,8 @@ package com.nexusforge.user.service;
 
 import com.nexusforge.dto.RegisterRequest;
 import com.nexusforge.enums.ResultCode;
+import com.nexusforge.enums.UserStatus;
+import com.nexusforge.event.UserBannedEvent;
 import com.nexusforge.exception.BusinessException;
 import com.nexusforge.file.FileBizType;
 import com.nexusforge.file.FileClient;
@@ -13,8 +15,10 @@ import com.nexusforge.user.repository.UserRepository;
 import com.nexusforge.user.vo.UserVo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -29,6 +33,8 @@ import java.util.concurrent.ThreadLocalRandom;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final UserRoleProvider userRoleProvider;
+    private final ApplicationEventPublisher eventPublisher;
     private final PasswordEncoder passwordEncoder;
     private final FileClient fileClient;
 
@@ -57,6 +63,7 @@ public class UserService {
         return UserVo.of(user);
     }
 
+    @Transactional
     public UserVo updateUser(Long userId, UpdateUserDto dto) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.USER_NOT_FOUND));
@@ -76,6 +83,7 @@ public class UserService {
             user.setPhone(dto.getPhone());
         }
         userRepository.save(user);
+        userRoleProvider.evict(userId); // 角色可能变了，清缓存
         return toVoWithFreshUrl(user);
     }
 
@@ -137,6 +145,7 @@ public class UserService {
         return UserVo.of(user);   // 不走 toVoWithFreshUrl，因为没有 key 了
     }
 
+    @Transactional
     public void changePassword(Long userId, ChangePasswordDto dto) {
         // 1. 查询用户
         User user = userRepository.findById(userId)
@@ -154,6 +163,17 @@ public class UserService {
         userRepository.save(user);
 
         log.info("User [{}] 密码更新成功", userId);
+    }
+
+    @Transactional
+    public void banUser(Long userId) {
+        userRepository.findById(userId).ifPresent(u -> {
+            u.setStatus(UserStatus.BANNED);
+            userRepository.save(u);
+        });
+        userRoleProvider.evict(userId);   // 清角色缓存
+        // 通过事件解耦踢下线：由 auth 模块监听执行
+        eventPublisher.publishEvent(new UserBannedEvent(userId));
     }
 
     /**

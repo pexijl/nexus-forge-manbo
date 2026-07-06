@@ -12,15 +12,14 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "jwt")
 public class JwtProperties {
 
-    /**
-     * JWT 签名密钥, Base64编码
-     */
+    /** Base64 编码的 HMAC 密钥（>=32 字节） */
     private String secret;
 
-    /**
-     * JWT 过期时间，单位为毫秒
-     */
-    private Long ttl;
+    /** access token 有效期（毫秒），默认 15 分钟 */
+    private Long accessTtl;
+
+    /** refresh token 有效期（毫秒），默认 7 天 */
+    private Long refreshTtl;
 
     /**
      * JWT 请求头名称
@@ -31,4 +30,13 @@ public class JwtProperties {
      * JWT 前缀，通常为 "Bearer "，用于从请求头中提取 Token
      */
     private String prefix;
+
+    /** 是否启用 Redis 黑名单；默认 true */
+    private Boolean enableBlacklist = Boolean.TRUE;
+
+    /** 黑名单 key 前缀 */
+    private String blacklistPrefix = "auth:blacklist:";
+
+    /** refresh token 存储前缀（白名单/版本号机制） */
+    private String refreshPrefix = "auth:refresh:";
 }

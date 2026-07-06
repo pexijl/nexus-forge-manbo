@@ -1,7 +1,10 @@
 package com.nexusforge.filter;
 
 import com.nexusforge.config.JwtProperties;
+import com.nexusforge.enums.TokenType;
+import com.nexusforge.security.PermissionLoader;
 import com.nexusforge.security.UserPrincipal;
+import com.nexusforge.service.AuthService;
 import com.nexusforge.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -32,8 +35,9 @@ import java.util.stream.Collectors;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
-
     private final JwtProperties jwtProps;
+    private final AuthService authService;
+    private final PermissionLoader permissionLoader;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -58,25 +62,39 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 3. 解析 Claims, 构建 Authentication 对象并设置到 SecurityContext
         try {
             Claims claims = jwtUtil.parseToken(token);
+
+            // 4. 必须是 access token（防 refresh 滥用）
+            if (jwtUtil.extractType(claims) != TokenType.ACCESS) {
+                log.debug("拒绝非 access token 进入业务接口");
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            // 5. 黑名单检查
+            if (jwtProps.getEnableBlacklist() && authService.isBlacklisted(claims)) {
+                log.debug("JWT 已被吊销: jti={}", claims.getId());
+                SecurityContextHolder.clearContext();
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            // 6. 从 Redis 拉权限（替代 token 内嵌）
             Long userId = Long.valueOf(claims.getSubject());
             String username = claims.get("username", String.class);
-
-            // 4. 从 Claims 中提取权限（生产建议从 Redis/DB 查询，避免 Token 过大）
-            // TODO: 从Redis中提取权限
-            @SuppressWarnings("unchecked")
-            List<String> roles = (List<String>) claims.get("roles");
-            List<GrantedAuthority>  authorities = roles.stream()
+            // 7. 从 Redis 拉取角色列表
+            List<String> roles = permissionLoader.loadRoles(userId);
+            List<GrantedAuthority> authorities = roles.stream()
                     .map(SimpleGrantedAuthority::new)
                     .collect(Collectors.toList());
 
-            // 5. 构建 Authentication 对象并设置到 SecurityContext
+            // 8. 构建 Authentication 对象并设置到 SecurityContext
             UserPrincipal principal = new UserPrincipal(userId, username);
             UsernamePasswordAuthenticationToken auth =
                     new UsernamePasswordAuthenticationToken(principal, null, authorities);
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(auth);
 
-            log.debug("JWT 认证成功: userId={}, username={}", userId, username);
+            log.debug("JWT 鉴权成功: userId={}, roles={}", userId, roles);
         } catch (Exception e) {
             log.error("JWT 解析异常", e);
             SecurityContextHolder.clearContext(); // 解析异常，清除上下文，继续处理其他过滤器
