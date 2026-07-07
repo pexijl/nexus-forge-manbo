@@ -11,6 +11,16 @@ repositories {
 }
 
 dependencies {
+    implementation project(':nexus-forge-common')
+    implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
+
+    // 单元测试：JUnit 5 + Mockito + AssertJ + Spring Test 一次拿齐
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Security 测试工具：用于在单元测试里直接 new BCryptPasswordEncoder
+    testImplementation 'org.springframework.security:spring-security-test'
+
+    // 显式覆盖 starter-test 自带的 JUnit BOM 版本（项目根 build.gradle 用的是 6.0.0）
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -18,4 +28,9 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    // 跑测试时显示中文日志不被 Gradle 截断
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = false
+    }
 }

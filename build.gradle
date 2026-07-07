@@ -1,12 +1,25 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.0.6'
+	id 'org.springframework.boot' version '4.1.0'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'com.nexusforge'
 version = '0.0.1-SNAPSHOT'
 description = 'nexus-forge'
+
+repositories {
+	mavenCentral()
+}
+
+bootJar {
+	enabled = false
+}
+
+jar {
+	enabled = true
+}
+
 
 
 subprojects {
@@ -25,11 +38,36 @@ subprojects {
 		mavenCentral()
 	}
 
+	// 统一管理依赖版本
+	ext {
+		springdocVersion = '3.0.3'
+	}
+
+	dependencyManagement {
+		dependencies {
+			dependency "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdocVersion}"
+		}
+	}
+
+	bootJar {
+		enabled = false
+	}
+
+	jar {
+		enabled = true
+	}
 
 	dependencies {
-		implementation 'org.springframework.boot:spring-boot-starter-webmvc'
-		testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
-		testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+		// Lombok 注解处理器（编译时依赖）
+		compileOnly 'org.projectlombok:lombok'
+		annotationProcessor 'org.projectlombok:lombok'
+
+		// Lombok 测试注解处理器（测试编译时依赖）
+		testCompileOnly 'org.projectlombok:lombok'
+		testAnnotationProcessor 'org.projectlombok:lombok'
+
+		developmentOnly "org.springframework.boot:spring-boot-devtools"
+		testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	}
 
 }

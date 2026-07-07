@@ -1,3 +1,92 @@
+# 通用配置文件
+
 spring:
+  config:
+    import: optional:file:.env[.properties]  # 自动读取仓库根的 .env
   application:
     name: nexus-forge
+  jackson:
+    timezone: UTC # 设置时区为UTC，避免时区问题导致的时间显示错误
+  profiles:
+    active: dev  # 默认激活 dev 环境
+  mvc:
+    problemdetails:
+      enabled: false # Problem Details for HTTP APIs 规范的错误响应格式
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 5MB          # 单文件上限（头像 5MB 够用）
+      max-request-size: 10MB      # 整个请求上限
+      file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
+
+springdoc:
+  swagger-ui:
+    # UI 路径：http://localhost:8080/swagger-ui/index.html
+    path: /swagger-ui/index.html
+    enabled: true
+    # 在 UI 里按 HTTP method 排序
+    operations-sorter: method
+    tags-sorter: alpha
+    # 启用 "Try it out" 按钮
+    try-it-out-enabled: true
+    # 显示请求/响应时长
+    display-request-duration: true
+    # 持久化认证信息（填了 Bearer token 不会刷新丢）
+    persist-authorization: true
+  # 扫描所有带 @RestController 的包
+  packages-to-scan: com.nexusforge
+  # 启动时输出文档生成日志（dev profile 开启方便调试）
+  show-actuator: false
+  # 默认分组
+  group-configs:
+    - group: 'public'
+      paths-to-match: '/api/auth/**'
+    - group: 'user'
+      paths-to-match: '/api/users/**'
+    - group: 'file'
+      paths-to-match: '/api/files/**'
+
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) [%X{traceId:-}] %clr([%t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
+
+storage:
+  vendor: ${STORAGE_VENDOR:rustfs} # 存储服务提供商，支持 minio、rustfs、aliyun、tencent、aws；其中 minio/rustfs/aliyun/tencent 均为 S3 兼容协议,字段语义相同
+
+  rustfs:
+    default:
+      endpoint: ${RUSTFS_ENDPOINT:http://localhost:9000}
+      region: ${RUSTFS_REGION:us-east-1}
+      access-key: ${RUSTFS_ACCESS_KEY}
+      secret-key: ${RUSTFS_SECRET_KEY}
+      bucket: ${RUSTFS_BUCKET:nexus-forge}
+      path-style: ${RUSTFS_PATH_STYLE:true}
+
+  minio:
+    default:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      region: ${MINIO_REGION:us-east-1}
+      access-key: ${MINIO_ACCESS_KEY}
+      secret-key: ${MINIO_SECRET_KEY}
+      bucket: ${MINIO_BUCKET:nexus-forge}
+      path-style: ${MINIO_PATH_STYLE:true}
+
+  aliyun:
+    default:
+      endpoint: https://oss-cn-beijing.aliyuncs.com
+      region: cn-beijing
+      access-key: ${ALIYUN_AK}          # ★ 从环境变量读
+      secret-key: ${ALIYUN_SK}
+      bucket: my-app-prod
+      path-style: false
+      cdn-domain: https://cdn.example.com  # ★ CDN 加速域名
+
+  tencent:
+    default:
+      endpoint: https://cos.ap-beijing.myqcloud.com
+      region: ap-beijing
+      secret-id: ${TENCENT_SECRET_ID}
+      secret-key: ${TENCENT_SECRET_KEY}
+      bucket: my-app-prod-1250000000    # ★ 腾讯云 bucket 名带 APPID 后缀
+      path-style: false

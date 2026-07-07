@@ -12,9 +12,15 @@ repositories {
 }
 
 dependencies {
-    testImplementation platform('org.junit:junit-bom:6.0.0')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation project(':nexus-forge-common')
+
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation("org.springframework.boot:spring-boot-starter-aspectj")
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation("com.bucket4j:bucket4j_jdk17-core:8.19.0")
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.4'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
 }
 
 test {

@@ -1,0 +1,44 @@
+services:
+  redis-server:
+    image: redis:latest
+    container_name: redis
+    # Redis 6+ 已支持在启动时直接加载密码(避免配置文件 bind 挂载)
+    # 密码由 .env 注入;默认值仅供本地体验,生产务必替换
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --requirepass "$$REDIS_PASSWORD"
+        else
+          exec redis-server
+        fi
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      # 无密码时直接 PING;有密码时通过 AUTH 验证
+      test:
+        - CMD-SHELL
+        - |
+          if [ -n "$$REDIS_PASSWORD" ]; then
+            redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG
+          else
+            redis-cli ping | grep -q PONG
+          fi
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: G:\\Volumes\\docker\\redis\\data

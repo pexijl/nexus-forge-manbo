@@ -1,0 +1,40 @@
+# 开发配置文件
+
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC} # 数据库连接URL，指定时区为UTC
+    username: ${DB_USERNAME:postgres} # 数据库用户名
+    password: ${DB_PASSWORD} # 数据库密码（dev 无默认，强制从环境变量注入）
+    driver-class-name: org.postgresql.Driver # 数据库驱动类名
+    hikari:
+      maximum-pool-size: 20 # Hikari连接池的最大连接数
+      minimum-idle: 5 # Hikari连接池的最小空闲连接数
+      connection-timeout: 30000 # Hikari连接池的连接超时时间（毫秒）
+  jpa:
+    hibernate:
+      ddl-auto: update # 开发环境使用update，自动更新数据库结构
+    properties:
+      hibernate:
+        format_sql: false # 格式化SQL语句，方便阅读
+    show-sql: true # 显示SQL语句，方便调试
+    open-in-view: false # 关闭Open Session in View，避免性能问题和潜在的内存泄漏
+
+
+jwt:
+  secret: ${JWT_SECRET:} # JWT的签名密钥（dev 无默认，强制从环境变量注入）
+  access-ttl: ${JWT_ACCESS_TTL_MS:900000} # JWT访问令牌的有效期，单位为毫秒（默认15分钟）
+  refresh-ttl: ${JWT_REFRESH_TTL_MS:604800000} # JWT刷新令牌的有效期，单位为毫秒（默认7天）
+  header: Authorization # 请求头中存放JWT的字段名称
+  prefix: Bearer # JWT的前缀，通常是Bearer，表示使用Bearer Token认证
+  enable-blacklist: true # 是否启用JWT黑名单功能，防止已注销的令牌被继续使用
+  blacklist-prefix: 'auth:blacklist:' # JWT黑名单在Redis中的前缀，方便区分其他数据
+  refresh-prefix: 'auth:refresh:' # JWT刷新令牌在Redis中的前缀，方便区分其他数据
+
+storage:
+  vendor: ${STORAGE_VENDOR:rustfs}
+

@@ -35,3 +35,12 @@ out/
 
 ### VS Code ###
 .vscode/
+docker/MinIO/minio.license
+.codegraph/daemon.pid
+
+# Local environment & secret overrides (never commit)
+.env
+.env.*
+!.env.example
+**/application-local.yaml
+**/application-secret.yaml

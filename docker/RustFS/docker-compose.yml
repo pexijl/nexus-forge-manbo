@@ -1,0 +1,42 @@
+services:
+  rustfs-server:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    environment:
+      # 鉴权信息(由 .env 注入,默认值仅供本地体验,生产务必替换)
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-rustfsadmin}
+      # 启用 Web 管理控制台
+      RUSTFS_CONSOLE_ENABLE: "true"
+      # 默认数据卷指向容器内 /data(对应 entrypoint 末尾的位置参数)
+      RUSTFS_VOLUMES: /data
+      # 监听地址,默认 :9000
+      RUSTFS_ADDRESS: :9000
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
+    volumes:
+      - rustfs_data:/data
+      - rustfs_config:/root/.rustfs
+    restart: unless-stopped
+    healthcheck:
+      # RustFS 暴露的是 /health 端点;9000 是 S3/API 端口
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  rustfs_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: G:\\Volumes\\docker\\rustfs\\data
+  rustfs_config:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: G:\\Volumes\\docker\\rustfs\\config

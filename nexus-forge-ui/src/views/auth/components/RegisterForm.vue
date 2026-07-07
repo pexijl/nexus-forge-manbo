@@ -1,0 +1,215 @@
+<template>
+  <Form
+    class="register-form-container"
+    v-slot="$form"
+    :initialValues
+    :resolver="resolver"
+    @submit="handleRegister"
+  >
+    <h2 class="text-center text-2xl font-bold">注册</h2>
+
+    <div class="form-field">
+      <FloatLabel>
+        <IconField>
+          <InputIcon>
+            <User />
+          </InputIcon>
+          <InputText name="username" id="username" v-model="registerForm.username" fluid />
+        </IconField>
+        <label for="username">用户名</label>
+      </FloatLabel>
+      <Message v-if="$form.username?.invalid" severity="error" size="small" variant="simple">
+        {{ $form.username.error?.message }}
+      </Message>
+    </div>
+
+    <div class="form-field">
+      <FloatLabel>
+        <IconField>
+          <InputIcon>
+            <Envelope />
+          </InputIcon>
+          <InputText name="email" id="email" v-model="registerForm.email" type="email" fluid />
+        </IconField>
+        <label for="email">邮箱</label>
+      </FloatLabel>
+      <Message v-if="$form.email?.invalid" severity="error" size="small" variant="simple">
+        {{ $form.email.error?.message }}
+      </Message>
+    </div>
+
+    <div class="form-field">
+      <FloatLabel>
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="password"
+            name="password"
+            v-model="registerForm.password"
+            :mask="passwordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="passwordMask = !passwordMask">
+            <Eye v-if="passwordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
+        <label for="password">密码</label>
+      </FloatLabel>
+      <Message v-if="$form.password?.invalid" severity="error" size="small" variant="simple">
+        {{ $form.password.error?.message }}
+      </Message>
+    </div>
+
+    <div class="form-field">
+      <FloatLabel>
+        <IconField>
+          <InputIcon>
+            <Lock />
+          </InputIcon>
+          <InputPassword
+            id="confirmPassword"
+            name="confirmPassword"
+            v-model="registerForm.confirmPassword"
+            :mask="confirmPasswordMask"
+            fluid
+          />
+          <InputIcon class="cursor-pointer" @click="confirmPasswordMask = !confirmPasswordMask">
+            <Eye v-if="confirmPasswordMask" />
+            <EyeSlash v-else />
+          </InputIcon>
+        </IconField>
+        <label for="confirmPassword">确认密码</label>
+      </FloatLabel>
+      <Message v-if="$form.confirmPassword?.invalid" severity="error" size="small" variant="simple">
+        {{ $form.confirmPassword.error?.message }}
+      </Message>
+    </div>
+
+    <Button type="submit" label="注册" />
+
+    <p class="auth-switch">
+      已有账号？
+      <a @click="switchToLogin">去登录</a>
+    </p>
+  </Form>
+</template>
+
+<script setup lang="ts">
+import Lock from '@primeicons/vue/lock';
+import Eye from '@primeicons/vue/eye';
+import EyeSlash from '@primeicons/vue/eye-slash';
+import User from '@primeicons/vue/user';
+import Envelope from '@primeicons/vue/envelope';
+import InputPassword from 'primevue/inputpassword';
+import { zodResolver } from '@primevue/forms/resolvers/zod';
+import { z } from 'zod';
+import router from '@/router';
+import { useAuthStore } from '@/stores/auth';
+import { ref } from 'vue';
+import { useToast } from 'primevue/usetoast';
+import { getErrorMessage } from '@/utils/error';
+
+const toast = useToast();
+const authStore = useAuthStore();
+const passwordMask = ref(true);
+const confirmPasswordMask = ref(true);
+const initialValues = ref({
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+});
+
+const registerForm = ref({
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+});
+
+const schema = z
+  .object({
+    username: z.string().min(3, { message: '用户名至少3位' }),
+    email: z.email({ message: '邮箱格式不正确' }),
+    password: z.string().min(6, { message: '密码至少6位' }),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: '两次密码不一致',
+    path: ['confirmPassword'],
+  });
+
+const resolver = ref(zodResolver(schema));
+
+interface FormSubmitEvent {
+  valid: boolean;
+  values: Record<string, unknown>;
+  states: Record<string, unknown>;
+}
+
+const handleRegister = async ({ valid }: FormSubmitEvent) => {
+  if (valid) {
+    try {
+      await authStore.register({
+        username: registerForm.value.username,
+        email: registerForm.value.email,
+        password: registerForm.value.password,
+      });
+      toast.add({ severity: 'success', summary: '注册成功', group: 'br', life: 3000 });
+      router.push({ query: { tab: 'login' } });
+    } catch (error) {
+      toast.add({
+        severity: 'error',
+        summary: '注册失败',
+        detail: getErrorMessage(error),
+        group: 'br',
+        life: 3000,
+      });
+    }
+  }
+};
+
+const switchToLogin = () => {
+  router.push({ query: { tab: 'login' } });
+};
+</script>
+
+<style scoped lang="scss">
+.register-form-container {
+  width: 100%;
+  max-width: 420px;
+  min-height: 400px;
+  padding: 2rem;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-field {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.auth-switch {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+
+  a {
+    color: var(--primary-500);
+    cursor: pointer;
+    font-weight: 500;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+</style>

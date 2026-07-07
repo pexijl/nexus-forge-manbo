@@ -1,0 +1,4 @@
+# 本地凭据覆盖(勿提交)
+.env
+.env.*
+!.env.example
