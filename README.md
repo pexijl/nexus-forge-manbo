@@ -44,7 +44,7 @@ nexus-forge/
 ├── nexus-forge-core/         # 核心基础设施(限流 / 幂等 / 请求日志 / 全局异常处理)
 ├── nexus-forge-auth/         # 认证:Spring Security + JWT(登录 / 注册 / 鉴权)
 ├── nexus-forge-user/         # 用户:实体、注册、资料修改、头像、密码变更(含单元测试)
-├── nexus-forge-file/         # 文件:对象存储抽象、S3/MinIO/阿里云/腾讯云实现
+├── nexus-forge-file/         # 文件:对象存储抽象,支持 MinIO / RustFS / 阿里云 OSS / 腾讯云 COS(均走 S3 协议)
 ├── nexus-forge-ai/           # AI 能力(规划中)
 ├── nexus-forge-visual/       # 可视化(规划中)
 └── nexus-forge-ui/           # 前端(Vue 3)
@@ -118,7 +118,7 @@ src/
 - Node.js ≥ 20
 - PostgreSQL ≥ 14(本地或 Docker)
 - Redis(本地或 Docker) —— 幂等与限流功能需要
-- MinIO 或 S3 兼容服务(for 文件存储,可选)
+- 对象存储:MinIO / RustFS / 阿里云 OSS / 腾讯云 COS(任选其一,均通过 S3 协议对接;本地推荐 `docker/MinIO` 或 `docker/RustFS` 一键启动)
 
 ### 后端启动
 
@@ -179,10 +179,10 @@ npm run dev
 | `DB_PASSWORD` | 数据库密码 | **无,必须注入** |
 | `JWT_SECRET` | JWT 签名密钥(≥32 字节) | **无,必须注入** |
 | `JWT_TTL_MS` | JWT 有效期(毫秒) | `7200000`(2 小时) |
-| `STORAGE_VENDOR` | 存储后端:`minio` / `aliyun` / `tencent` | `minio` |
+| `STORAGE_VENDOR` | 存储后端:`rustfs` / `minio` / `aliyun` / `tencent` | `rustfs` |
+| `RUSTFS_*` | RustFS 连接参数(endpoint / region / access-key / secret-key / bucket / path-style) | dev 默认 `rustfsadmin/rustfsadmin` 仅供本地 |
 | `MINIO_*` | MinIO 连接参数 | dev 默认 `minioadmin/minioadmin` 仅供本地 |
 | `ALIYUN_*` / `TENCENT_*` | 阿里云 OSS / 腾讯云 COS | 留空,按需填写 |
-
 > dev profile 下 `DB_PASSWORD` / `JWT_SECRET` **无默认值** —— 缺失时会启动失败,避免用空凭据静默运行。
 
 ### 生产环境
@@ -193,7 +193,7 @@ npm run dev
 - CI/CD Secret 配合 `envsubst` 渲染 `application-prod.yaml`
 - 配置中心(Nacos / Apollo / Spring Cloud Config)
 
-prod profile 下所有凭据均**无默认值**,缺失即启动失败。
+prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库密码、JWT 签名密钥)均**无默认值**,缺失即启动失败;非凭据字段(endpoint / bucket / region 等)继承基础 `application.yaml` 的 dev 默认值,生产部署时必须用真实值覆盖。
 
 ### 凭据轮换
 
@@ -237,10 +237,9 @@ prod profile 下所有凭据均**无默认值**,缺失即启动失败。
 - 单元测试:注册、更新资料、修改密码 三个 Service 核心路径覆盖
 
 ### 文件(`nexus-forge-file`)
-
 - `StorageProvider` — 统一存储接口(upload / download / delete / presignedUrl / exists)
-- `S3StorageProvider` — S3/MinIO/阿里云 OSS/腾讯云 COS 实现
-- `StorageProperties` — 多厂商配置绑定(endpoint / bucket / access-key / secret-key / region / path-style)
+- `S3StorageProvider` — S3 兼容协议实现,支持 MinIO / RustFS / 阿里云 OSS / 腾讯云 COS / AWS S3(共享同一套 AWS SDK v2 客户端)
+- `StorageProperties` — 多厂商配置绑定(endpoint / bucket / access-key / secret-key / region / path-style);`storage.vendor` 支持 `minio` / `rustfs` / `aliyun` / `tencent` / `aws`
 - `FileController` — 单/多文件上传、下载、删除、批量删除、预签名 URL(PUT/GET)、分片上传(初始化 / 预签名分片 / 完成合并)
 - `FileService` — 文件业务逻辑(命名策略、类型过滤)
 - `FileClientImpl` — 业务侧门面(供用户头像等场景调用)
