@@ -16,7 +16,6 @@
         "./src/components/*"
       ]
     },
-    /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

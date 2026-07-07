@@ -93,14 +93,14 @@ const resolver = ref(zodResolver(schema));
 
 interface FormSubmitEvent {
   valid: boolean;
-  values: Record<string, any>;
-  states: Record<string, any>;
+  values: Record<string, unknown>;
+  states: Record<string, unknown>;
 }
 
 const handleLogin = async ({ valid, values }: FormSubmitEvent) => {
   if (!valid) return;
   try {
-    await authStore.login(values as LoginRequest);
+    await authStore.login(values as unknown as LoginRequest);
     toast.add({ severity: 'success', summary: '登录成功', life: 3000 });
     const raw = route.query.redirect;
     const candidate = Array.isArray(raw) ? raw[0] : raw;

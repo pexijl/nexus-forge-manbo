@@ -146,11 +146,11 @@ const resolver = ref(zodResolver(schema));
 
 interface FormSubmitEvent {
   valid: boolean;
-  values: Record<string, any>;
-  states: Record<string, any>;
+  values: Record<string, unknown>;
+  states: Record<string, unknown>;
 }
 
-const handleRegister = async ({ valid, values }: FormSubmitEvent) => {
+const handleRegister = async ({ valid }: FormSubmitEvent) => {
   if (valid) {
     try {
       await authStore.register({
@@ -168,7 +168,6 @@ const handleRegister = async ({ valid, values }: FormSubmitEvent) => {
         group: 'br',
         life: 3000,
       });
-    } finally {
     }
   }
 };
