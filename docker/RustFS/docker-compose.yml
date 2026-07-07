@@ -10,11 +10,11 @@ services:
       RUSTFS_CONSOLE_ENABLE: "true"
       # 默认数据卷指向容器内 /data(对应 entrypoint 末尾的位置参数)
       RUSTFS_VOLUMES: /data
-      # 监听地址,默认 :9000 与 MinIO 一致,这样切换 vendor 时应用侧 endpoint 无需变更
+      # 监听地址,默认 :9000
       RUSTFS_ADDRESS: :9000
     ports:
-      - "9000:9000"   # S3 API(与 MinIO 同端口,便于 STORAGE_VENDOR 二选一)
-      - "9001:9001"   # Web 控制台(与 MinIO 同端口)
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
     volumes:
       - rustfs_data:/data
       - rustfs_config:/root/.rustfs
@@ -33,7 +33,6 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      # 与 docker/MinIO 保持同款宿主路径风格,按需调整
       device: G:\\Volumes\\docker\\rustfs\\data
   rustfs_config:
     driver: local

@@ -1,4 +1,4 @@
-# RustFS(本项目文件存储的 MinIO 替代方案)
+# RustFS
 
 [RustFS](https://rustfs.com) 是 Rust 写的高性能 S3 兼容对象存储,Apache 2.0 协议,作为 `docker/MinIO` 的平迁备选。
 本目录的 compose 与配置在端口、鉴权、Bucket 命名上与 `docker/MinIO` **完全对齐**,切换时**业务代码零改动**。

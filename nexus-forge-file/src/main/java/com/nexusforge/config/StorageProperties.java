@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * 存储配置属性类
  * <p>用于从 application.properties 或 application.yml 中加载存储相关的配置</p>
- * <p>支持多厂商配置：MinIO、阿里云 OSS、腾讯云 COS、AWS S3</p>
+ * <p>支持多厂商配置：RustFS、MinIO、阿里云 OSS、腾讯云 COS、AWS S3</p>
  */
 @Data
 @Configuration
@@ -19,11 +19,26 @@ public class StorageProperties {
 
     /**
      * 当前激活的存储厂商类型
-     * <p>可选值：minio | aws | aliyun | tencent</p>
-     * <p>默认值：minio</p>
+     * <p>可选值：rustfs | minio | aws | aliyun | tencent</p>
+     * <p>默认值：rustfs</p>
      * <p>配置示例：storage.vendor=aliyun</p>
      */
-    private String vendor = "minio";
+    private String vendor = "rustfs";
+
+    /**
+     * RustFS 厂商配置映射
+     * <p>Key: 配置名称（如 default, backup, test 等）</p>
+     * <p>Value: 对应的厂商连接配置</p>
+     * <p>配置示例：
+     * <pre>
+     * storage.rustfs.default.endpoint=http://localhost:9000
+     * storage.rustfs.default.access-key=rustfs-access-key
+     * storage.rustfs.default.secret-key=rustfs-secret-key
+     * storage.rustfs.default.bucket=my-rustfs-bucket
+     * </pre>
+     * </p>
+     */
+    private Map<String, VendorConfig> rustfs = new HashMap<>();
 
     /**
      * MinIO 厂商配置映射
@@ -97,6 +112,7 @@ public class StorageProperties {
      */
     public VendorConfig getActive() {
         return switch (vendor) {
+            case "rustfs"  -> rustfs.getOrDefault("default", new VendorConfig());
             case "aliyun"  -> aliyun.getOrDefault("default", new VendorConfig());
             case "tencent" -> tencent.getOrDefault("default", new VendorConfig());
             case "aws"     -> aws.getOrDefault("default", new VendorConfig());
@@ -113,6 +129,7 @@ public class StorageProperties {
 
         /**
          * 服务端点地址
+         * <p>对于 RustFS：格式为 http://host:port，如 http://localhost:9000</p>
          * <p>对于 MinIO：格式为 http://host:port，如 http://localhost:9000</p>
          * <p>对于阿里云 OSS：格式为 oss-cn-hangzhou.aliyuncs.com（不含协议头）</p>
          * <p>对于腾讯云 COS：格式为 cos.ap-guangzhou.myqcloud.com（不含协议头）</p>

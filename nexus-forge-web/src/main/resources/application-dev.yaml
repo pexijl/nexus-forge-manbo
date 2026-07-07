@@ -36,4 +36,5 @@ jwt:
   refresh-prefix: 'auth:refresh:' # JWT刷新令牌在Redis中的前缀，方便区分其他数据
 
 storage:
-  vendor: ${STORAGE_VENDOR:minio}
+  vendor: ${STORAGE_VENDOR:rustfs}
+

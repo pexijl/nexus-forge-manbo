@@ -52,14 +52,23 @@ logging:
     console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr(%5p) [%X{traceId:-}] %clr([%t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n"
 
 storage:
-  vendor: ${STORAGE_VENDOR:minio} # 存储服务提供商，支持 minio、aliyun、tencent、qiniu、local
+  vendor: ${STORAGE_VENDOR:rustfs} # 存储服务提供商，支持 minio、rustfs、aliyun、tencent、aws；其中 minio/rustfs/aliyun/tencent 均为 S3 兼容协议,字段语义相同
+
+  rustfs:
+    default:
+      endpoint: ${RUSTFS_ENDPOINT:http://localhost:9000}
+      region: ${RUSTFS_REGION:us-east-1}
+      access-key: ${RUSTFS_ACCESS_KEY}
+      secret-key: ${RUSTFS_SECRET_KEY}
+      bucket: ${RUSTFS_BUCKET:nexus-forge}
+      path-style: ${RUSTFS_PATH_STYLE:true}
 
   minio:
     default:
       endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
       region: ${MINIO_REGION:us-east-1}
-      access-key: ${MINIO_ACCESS_KEY:minioadmin}      # dev 默认仅供本地,生产必须覆盖
-      secret-key: ${MINIO_SECRET_KEY:minioadmin}      # dev 默认仅供本地,生产必须覆盖
+      access-key: ${MINIO_ACCESS_KEY}
+      secret-key: ${MINIO_SECRET_KEY}
       bucket: ${MINIO_BUCKET:nexus-forge}
       path-style: ${MINIO_PATH_STYLE:true}
 
