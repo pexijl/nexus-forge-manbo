@@ -15,11 +15,6 @@ services:
     ports:
       - "9000:9000"   # S3 API(与 MinIO 同端口,便于 STORAGE_VENDOR 二选一)
       - "9001:9001"   # Web 控制台(与 MinIO 同端口)
-    command:
-      - /entrypoint.sh
-      - rustfs
-      # 显式声明数据目录 + 启用控制台 + 鉴权密钥(优先级高于环境变量,便于本地直接修改)
-      - /data
     volumes:
       - rustfs_data:/data
       - rustfs_config:/root/.rustfs
