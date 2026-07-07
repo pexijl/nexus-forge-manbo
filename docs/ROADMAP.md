@@ -20,11 +20,12 @@
 
 ---
 
-## 🔥 当前冲刺(2026-07-05 ~ 2026-07-06)
+## 🔥 当前冲刺(2026-07-07)
 
-> 上一轮冲刺(06-24 ~ 06-25)已全部完成,当前聚焦认证加固、Docker 编排与测试覆盖。
+> 上一轮冲刺(07-05 ~ 07-06)的认证加固、Docker 编排、UI 适配已全部完成,本轮聚焦对象存储
+> 多 vendor 化与基础设施补齐。
 
-### ✅ 上一轮已完成
+### ✅ 上一轮已完成(07-05 ~ 07-06)
 
 - [x] `nexus-forge-file` 文件模块 —— 存储抽象层 + S3/MinIO/阿里云/腾讯云实现 + 文件控制器 + 分片上传 + 预签名 URL
 - [x] 后端:`PATCH /users/me`(昵称 / 头像 / 邮箱 / 手机)
@@ -37,13 +38,15 @@
 - [x] 前端:axios 拦截器 401 → 跳登录 / 403 → Toast
 - [x] 前端:退出登录流程(清除 token + 跳转)
 - [x] `user` 模块单元测试(注册 / 更新资料 / 修改密码)
+- [x] 后端:Token 双轨制(access + refresh)+ Redis 黑名单(`6e43be9`)
+- [x] 前端:适配 Token 双轨制与单飞刷新(`b9ae9d6`)
+- [x] Docker Compose:新增 `docker/RustFS`(MinIO 平迁备选,`fc97d4d`)+ `docker/Redis`(`1c7721c`)+ `docker/Postgres`(`e35aa5a`)
+- [x] 存储:`StorageProperties` 接入 RustFS 作为一等 vendor(`ad1ec7b`);S3StorageProvider 共享同一套 AWS SDK v2 客户端
+- [x] 文档:同步 README + ROADMAP 至当前状态(`00e74ef` / `c35d77e`)
 
-### 🔥 本轮待办
+### 🔥 本轮待办(07-07 ~)
 
-- [ ] 后端:`POST /auth/refresh`(access + refresh 双 Token)
-- [ ] 后端:登出 / Token 黑名单(Redis)
-- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限
-- [ ] Docker Compose 一键起 PostgreSQL + Redis + MinIO
+- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
 - [ ] 集成测试:auth + user + file 端到端
 - [ ] GitHub Actions CI(lint + test + build)
 
@@ -66,15 +69,14 @@
 ## nexus-forge-auth
 
 - [x] 用户注册(`POST /api/auth/register`)
-- [x] 用户登录 / JWT 签发(`POST /api/auth/login`)
-- [x] `JwtAuthenticationFilter` 解析 Token 写 `SecurityContext`
+- [x] 用户登录 / JWT 签发(`POST /api/auth/login`,access + refresh 双 Token)
+- [x] `JwtAuthenticationFilter` 解析 Token 写 `SecurityContext`(已校验 Redis 黑名单)
 - [x] `UserPrincipal` 统一认证主体
 - [x] JSON 格式 401/403 响应(`JsonAuthHandlers`)
-- [ ] Token 刷新机制(`POST /api/auth/refresh`)
-- [ ] 从 Redis 读取角色与权限,避免 Token 膨胀
-- [ ] 登出 / Token 黑名单
+- [x] Token 刷新机制(`POST /api/auth/refresh`)— `6e43be9`
+- [x] 登出 / Token 黑名单(`POST /api/auth/logout`)— `6e43be9`
+- [ ] 从 Redis 读取角色与权限,避免 Token 膨胀(角色当前直接写 claims)
 - [ ] 密码重置(邮箱验证码)
-- [ ] 登录失败限流(同 IP / 同账号)
 
 ## nexus-forge-user
 
@@ -94,7 +96,7 @@
 
 **统一使用 AWS S3 SDK 作为基础抽象** —— MinIO、阿里云 OSS、腾讯云 COS 均提供 S3 兼容接口,可通过 `endpoint` 切换实现零成本迁移。仅在需要厂商特有能力(如 OSS 图片处理回调)时再额外接入官方 SDK。
 
-- **开发**:MinIO(本地 Docker) —— S3 SDK 接入,Console Web UI(`:9001`)调试
+- **开发**:MinIO(本地 Docker,`docker/MinIO`)/ RustFS(Apache 2.0 平迁备选,`docker/RustFS`)二选一 —— S3 SDK 接入,Console Web UI(`:9001`)调试
 - **测试**:任意 S3 兼容服务 —— Ceph RGW / SeaweedFS / 自建 MinIO
 - **生产**:阿里云 OSS / 腾讯云 COS / 自选 —— 优先走 S3 兼容模式,endpoint 切换
 
@@ -105,12 +107,11 @@
 - [x] 统一配置:`endpoint` / `bucket` / `access-key` / `secret-key` / `region` / `path-style`
 
 ### MinIO 开发环境(本地)
-
 - [x] Docker Compose 启动 MinIO(API `:9000` + Console `:9001`)
-- [x] 启动脚本自动创建 bucket(`nexus-forge-dev`)
-- [x] `S3StorageProvider` 实现(基于 `software.amazon.awssdk:s3`,兼容 MinIO)
+- [x] `S3StorageProvider` 实现(基于 `software.amazon.awssdk:s3`,兼容 MinIO / RustFS / 阿里云 / 腾讯)
 - [x] `application-dev.yaml` 完整配置示例
-- [ ] Console Web UI 调试入口文档
+- [x] `StorageProvider#createBucket` 已实现(`S3StorageProvider.createBucket`),但**尚未**接入启动钩子 —— 首次部署需手动在 Console Web UI 创建或后端补一个 `ApplicationRunner`
+- [ ] Console Web UI 调试入口文档(目前仅 `docker/RustFS/README.md` 提到,主 README 未汇总)
 
 ### 测试环境(S3 兼容)
 
@@ -186,13 +187,11 @@
 - [ ] 🟡 全局错误边界 + Loading 状态
 - [ ] 🟢 国际化(i18n,中文 / 英文)
 
-## 横切关注点
-
 - [x] OpenAPI / Swagger 文档接入(springdoc-openapi 3.0.3, `/swagger-ui/index.html`)
 - [x] 全局统一异常响应(`GlobalExceptionHandler` + `Result<T>`)
 - [x] 单元测试: `user` 模块(4 个测试类,覆盖注册 / 更新 / 改密 / 实体)
+- [x] Docker Compose 一键起 PostgreSQL(`docker/Postgres`)+ Redis(`docker/Redis`)+ 对象存储(`docker/MinIO` / `docker/RustFS`)
 - [ ] 集成测试:auth + user + file 端到端
-- [ ] Docker Compose 一键起依赖(PostgreSQL / Redis / MinIO)
 - [ ] CI:GitHub Actions 跑 lint + test + build
 - [ ] 日志规范(SLF4J + Logback,JSON 结构化输出)
 - [ ] 请求 / 响应日志脱敏(手机 / 邮箱 / Token)
@@ -202,5 +201,5 @@
 ## 来源
 
 - README.md「待开发」章节
-- 代码内 `// TODO` 扫描(2026-07-05 无残留)
-- git log 已完成功能回溯
+- 代码内 `// TODO` 扫描(2026-07-07)
+- git log 已完成功能回溯(本轮: `e35aa5a` / `1c7721c` / `6e43be9` / `b9ae9d6` / `fc97d4d` / `ad1ec7b` / `c35d77e` 等)

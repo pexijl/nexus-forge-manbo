@@ -2,7 +2,7 @@
 
 一个基于 **Java 26 + Spring Boot 4** 与 **Vue 3** 的全栈应用骨架,按业务能力拆分为 Gradle 多模块项目。
 
-> 当前进度: `auth` / `user` / `file` / `core` 四个后端模块均已实现; `core` 提供了限流、幂等、请求日志等基础设施; 前端已补齐布局骨架与个人中心页; 接入 Swagger UI 在线文档; `user` 模块已有单元测试覆盖。
+> 当前进度: `auth` / `user` / `file` / `core` 四个后端模块均已实现; `core` 提供了限流、幂等、请求日志等基础设施; 前端已补齐布局骨架与个人中心页; 接入 Swagger UI 在线文档; `user` 模块已有单元测试覆盖; 认证侧已落地 Token 双轨制(access + refresh)与 Redis 黑名单精确吊销; Docker 编排覆盖 PostgreSQL / Redis / 对象存储(MinIO + RustFS)四栈。
 
 ---
 
@@ -116,22 +116,27 @@ src/
 
 - JDK 26
 - Node.js ≥ 20
-- PostgreSQL ≥ 14(本地或 Docker)
-- Redis(本地或 Docker) —— 幂等与限流功能需要
+- PostgreSQL ≥ 14(本地或 Docker) —— 本仓库提供 `docker/Postgres` 一键编排(`postgres:latest`,端口 5432,库 `nexus-forge`)
+- Redis ≥ 7(本地或 Docker) —— 幂等、限流、Token 黑名单都需要 —— 本仓库提供 `docker/Redis` 一键编排(`redis:7-alpine`,端口 6379)
 - 对象存储:MinIO / RustFS / 阿里云 OSS / 腾讯云 COS(任选其一,均通过 S3 协议对接;本地推荐 `docker/MinIO` 或 `docker/RustFS` 一键启动)
 
 ### 后端启动
 
-```bash
-# 1. 准备数据库
-psql -U postgres -c "CREATE DATABASE nexus_forge;"
+1. 起本地依赖(`docker/` 目录提供一栈编排,各服务独立目录可单独启停):
 
-# 2. 修改环境配置(如需)
-# nexus-forge-web/src/main/resources/application-dev.yaml 中调整数据源与 JWT 配置
+   ```bash
+   cd docker/Postgres && cp .env.example .env && docker compose up -d   # PostgreSQL
+   cd ../Redis      && cp .env.example .env && docker compose up -d     # Redis
+   cd ../RustFS     && cp .env.example .env && docker compose up -d     # 对象存储(RustFS,平迁 MinIO)
+   ```
 
-# 3. 启动
-./gradlew :nexus-forge-web:bootRun
-```
+   各编排默认 bind 到 `G:\Volumes\docker\<service>\data`,Windows + Docker Desktop 无需 chown。
+2. 修改环境配置(如需):`nexus-forge-web/src/main/resources/application-dev.yaml` 调整数据源与 JWT 配置
+3. 启动:
+
+   ```bash
+   ./gradlew :nexus-forge-web:bootRun
+   ```
 
 默认端口:`8080`,默认 profile:`dev`(可在根 `application.yaml` 修改)。启动后访问:
 
@@ -177,13 +182,16 @@ npm run dev
 | `DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/nexus-forge?serverTimezone=UTC` |
 | `DB_USERNAME` | 数据库账号 | `postgres` |
 | `DB_PASSWORD` | 数据库密码 | **无,必须注入** |
+| `REDIS_HOST` | Redis 主机(用 `127.0.0.1` 而非 `localhost`,避免 Windows 偶发 IPv6 解析超时) | `localhost` |
+| `REDIS_PORT` | Redis 端口 | `6379` |
+| `REDIS_PASSWORD` | Redis 密码(`docker/Redis` 编排注入) | 留空 |
 | `JWT_SECRET` | JWT 签名密钥(≥32 字节) | **无,必须注入** |
-| `JWT_TTL_MS` | JWT 有效期(毫秒) | `7200000`(2 小时) |
+| `JWT_ACCESS_TTL_MS` | access Token 有效期(毫秒) | `900000`(15 分钟) |
+| `JWT_REFRESH_TTL_MS` | refresh Token 有效期(毫秒) | `604800000`(7 天) |
 | `STORAGE_VENDOR` | 存储后端:`rustfs` / `minio` / `aliyun` / `tencent` | `rustfs` |
 | `RUSTFS_*` | RustFS 连接参数(endpoint / region / access-key / secret-key / bucket / path-style) | dev 默认 `rustfsadmin/rustfsadmin` 仅供本地 |
 | `MINIO_*` | MinIO 连接参数 | dev 默认 `minioadmin/minioadmin` 仅供本地 |
 | `ALIYUN_*` / `TENCENT_*` | 阿里云 OSS / 腾讯云 COS | 留空,按需填写 |
-> dev profile 下 `DB_PASSWORD` / `JWT_SECRET` **无默认值** —— 缺失时会启动失败,避免用空凭据静默运行。
 
 ### 生产环境
 
@@ -219,12 +227,15 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 
 ### 认证(`nexus-forge-auth`)
 
-- `POST /api/auth/register` — 用户注册
-- `POST /api/auth/login` — 用户登录,签发 JWT
-- `JwtAuthenticationFilter` — 解析请求头 `Authorization: Bearer <token>`,构建 `SecurityContext`
-- `SecurityConfig` — 路由级权限控制、CORS 配置
+- `POST /api/auth/login` — 用户登录,签发 access + refresh 双 Token(`TokenBundle` 返回)
+- `POST /api/auth/refresh` — 用 refresh Token 换发新 access + refresh,旧 refresh 加入黑名单
+- `POST /api/auth/logout` — 登出:access Token 写入 Redis 黑名单(TTL = 剩余有效期),refresh 版本号失效使历史 refresh 全部失效
+- `JwtAuthenticationFilter` — 解析请求头 `Authorization: Bearer <token>`,校验黑名单,构建 `SecurityContext`
+- `SecurityConfig` — 路由级权限控制(`/api/auth/login|register|refresh` 放行)、CORS 配置
 - `JsonAuthHandlers` — JSON 格式的 401/403 响应
 - `UserPrincipal` — `record(userId, username)`,作为 `Authentication.principal` 在 `SecurityContext` 中传递
+- Token 双轨制:access 走业务接口,refresh 走刷新接口;`typ` 字段区分,防 refresh 滥用
+- Redis 黑名单(`auth:blacklist:{jti}`)+ refresh 版本号(`auth:refresh:{userId}`),精确吊销与单点登录
 
 ### 用户(`nexus-forge-user`)
 
@@ -295,7 +306,6 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
     "data": { ... }
   }
   ```
-
 - 受保护接口需携带请求头:`Authorization: Bearer <token>`
 - 业务错误码集中在 `ResultCode`,前端根据 `code` 判断具体业务结果
 - 详细 API 文档请访问运行中服务的 `/swagger-ui/index.html`
@@ -304,14 +314,16 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 
 ## 待开发
 
+
 - [ ] `nexus-forge-ai`:LLM 调用网关、流式响应、向量检索 / RAG
 - [ ] `nexus-forge-visual`:图表 / 看板 / 大屏组件
-- [ ] 后端:Token 刷新(`POST /auth/refresh`)、登出黑名单
+- [x] 后端:Token 刷新(`POST /auth/refresh`)、登出黑名单 — `6e43be9`
+- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
 - [ ] 后端:密码重置(邮箱验证码)、第三方登录
 - [ ] 前端:业务首页(`/home`)真实数据、权限路由(基于 Role)
 - [ ] 前端:i18n 国际化(中文 / 英文)
 - [ ] 集成测试:auth + user + file 端到端
-- [ ] Docker Compose 一键起 PostgreSQL + Redis(目前仅 MinIO 有 Compose)
+- [x] Docker Compose 一键起 PostgreSQL / Redis — `e35aa5a` / `1c7721c`(对象存储:`docker/MinIO`、`docker/RustFS`)
 - [ ] GitHub Actions CI(lint + test + build)
 
 ---
