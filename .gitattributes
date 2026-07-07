@@ -1,0 +1,10 @@
+# 统一 LF 换行,避免跨平台协作时 CRLF/LF 混合造成 diff 噪音
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.ts        text eol=lf
+*.vue       text eol=lf
+*.scss      text eol=lf
+*.css       text eol=lf
+*.gradle    text eol=lf
+*.properties text eol=lf
