@@ -1,0 +1,37 @@
+services:
+  postgres-server:
+    image: postgres:latest
+    container_name: postgres
+    # docker-library 官方镜像,无需 registry 登录
+    environment:
+      # 必填:docker-library/postgres 在 POSTGRES_PASSWORD 为空时拒绝 initdb
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # 与业务侧 DB_URL 中的 /nexus-forge 对齐;若留空,镜像默认创建与 POSTGRES_USER 同名的库
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nexus-forge}
+      # 显式把 PGDATA 拉回 /var/lib/postgresql/data(老位置),
+      # 否则 PG18 默认是 /var/lib/postgresql/18/docker,大版本升级时路径会跳变
+      PGDATA: /var/lib/postgresql/data
+      # initdb 启用数据校验和,小幅写放大换取静默损坏可检测
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5432:5432"
+    volumes:
+      # 显式 PGDATA=/var/lib/postgresql/data 与宿主 bind 路径一一对应
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      # pg_isready 是 Postgres 自带的探活工具
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nexus-forge}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: G:\\Volumes\\docker\\postgresql\\data
