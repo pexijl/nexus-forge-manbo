@@ -103,7 +103,7 @@ class UserServiceUpdateUserTest extends UserServiceTestSupport {
         @DisplayName("新邮箱已被他人占用：抛 EMAIL_ALREADY_EXISTS")
         void rejects_email_collision() {
             stubUserExists();
-            when(userRepository.existsByEmail("taken@example.com")).thenReturn(true);
+            when(userRepository.existsByEmailAndIdNot("taken@example.com", USER_ID)).thenReturn(true);
 
             UpdateUserDto dto = new UpdateUserDto();
             dto.setEmail("taken@example.com");
