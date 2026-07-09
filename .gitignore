@@ -44,3 +44,4 @@ docker/MinIO/minio.license
 !.env.example
 **/application-local.yaml
 **/application-secret.yaml
+/WATCHDOG.yml
