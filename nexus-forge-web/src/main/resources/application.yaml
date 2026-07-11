@@ -19,6 +19,21 @@ spring:
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
 
+server:
+  tomcat:
+    # 允许 Tomcat 吞掉被 multipart 限制拒绝后的剩余请求体，避免客户端看到连接重置而拿不到 413 JSON。
+    max-swallow-size: 20MB
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+  endpoints:
+    web:
+      exposure:
+        include: health
+
 springdoc:
   swagger-ui:
     # UI 路径：http://localhost:8080/swagger-ui/index.html

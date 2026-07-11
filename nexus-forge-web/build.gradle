@@ -4,7 +4,7 @@ plugins {
 
 group = 'com.nexusforge'
 version = '0.0.1-SNAPSHOT'
-description='启动模块'
+description = '启动模块'
 
 repositories {
     mavenCentral()
@@ -15,21 +15,36 @@ bootJar {
 }
 
 dependencies {
-
     implementation project(':nexus-forge-core')
     implementation project(':nexus-forge-common')
     implementation project(':nexus-forge-user')
     implementation project(':nexus-forge-auth')
     implementation project(':nexus-forge-file')
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
-
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
-    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // 测试依赖
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-restclient'
+    testImplementation 'org.springframework.security:spring-security-test'
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+
+    // Testcontainers
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:postgresql'
+
+    // S3 SDK —— 集成测试启动时建 bucket(生产代码 nexus-forge-file 已带,test 只引一份)
+    testImplementation platform('software.amazon.awssdk:bom:2.46.16')
+    testImplementation 'software.amazon.awssdk:s3'
 }
 
-test {
-    useJUnitPlatform()
+// 集成测试默认隔离,-Pintegration 开启才执行
+tasks.named('test') {
+    useJUnitPlatform {
+        if (!project.hasProperty('integration')) {
+            excludeTags 'integration'
+        }
+    }
 }
