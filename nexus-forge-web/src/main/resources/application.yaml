@@ -68,6 +68,7 @@ logging:
 
 storage:
   vendor: ${STORAGE_VENDOR:rustfs} # 存储服务提供商，支持 minio、rustfs、aliyun、tencent、aws；其中 minio/rustfs/aliyun/tencent 均为 S3 兼容协议,字段语义相同
+  auto-create-bucket: true   # 默认 true
 
   rustfs:
     default:
