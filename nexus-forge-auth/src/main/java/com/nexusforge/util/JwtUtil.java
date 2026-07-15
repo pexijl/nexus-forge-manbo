@@ -53,14 +53,17 @@ public class JwtUtil {
      *   "typ": "access" | "refresh", // Token 类型，防止 refresh token 误用于业务接口
      *   "jti": "uuid-v4",            // Token 唯一标识，用于黑名单精确吊销和刷新版本控制
      *   "username": "alice",         // 用户名（业务字段）
-     *   "roles": ["USER"],           // 角色列表（业务字段）
      *   "iat": 1720204800,           // 签发时间（秒）
      *   "exp": 1720205700            // 过期时间（秒）：access 默认 +15min，refresh 默认 +7d
      * }
      * </pre>
      *
+     * <p>注意：角色（roles）<b>不放在 token 中</b>。每个请求由
+     * {@link com.nexusforge.security.PermissionLoader} 从 Redis
+     * (`auth:roles:{userId}`) 实时拉取，便于立即反映角色变更且避免 Token 膨胀。</p>
+     *
      * @param subject 用户 ID（作为 JWT 的 subject 声明）
-     * @param claims  自定义业务声明（需包含 username、roles 等字段）
+     * @param claims  自定义业务声明（推荐仅放 username 等展示性字段）
      * @param type    Token 类型（ACCESS / REFRESH），决定有效期长度和后续校验逻辑
      * @return TokenPair 包含：
      *         <ul>
@@ -82,7 +85,7 @@ public class JwtUtil {
                 .id(jti)
                 // 设置主题（存储 userId）
                 .subject(subject)
-                // 设置自定义业务声明（username、roles 等）
+                // 设置自定义业务声明（当前仅 username；角色走 Redis，见上文）
                 .claims(claims)
                 // 设置 Token 类型标识（access/refresh，防止误用）
                 .claim("typ", type.name().toLowerCase())

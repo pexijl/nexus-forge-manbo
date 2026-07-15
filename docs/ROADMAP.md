@@ -46,7 +46,7 @@
 
 ### 🔥 本轮待办(07-07 ~)
 
-- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
+- [x] 后端:`JwtAuthenticationFilter` 已从 Redis 读权限(`PermissionLoader → UserRoleProvider → Redis`,TTL 5min,evict 链路就绪);后续清理:AuthService 不再把 roles 写进 token(避免 Token 膨胀),`JwtUtil#createToken` javadoc 同步更新;filter 全程只读 username 自 token,角色全部经 Redis;compile + 单元测试(25 个 user + web 集成)通过
 - [ ] 集成测试:auth + user + file 端到端
 - [ ] GitHub Actions CI(lint + test + build)
 
