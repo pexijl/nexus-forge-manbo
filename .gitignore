@@ -48,3 +48,4 @@ docker/MinIO/minio.license
 # Local planning doc for LLM gateway (kept untracked on purpose)
 /docs/AI-GATEWAY-PLAN.md
 /.mcp.json
+/docs/AI-GATEWAY-P1-IMPLEMENTATION.md
