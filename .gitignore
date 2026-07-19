@@ -45,3 +45,6 @@ docker/MinIO/minio.license
 **/application-local.yaml
 **/application-secret.yaml
 /WATCHDOG.yml
+# Local planning doc for LLM gateway (kept untracked on purpose)
+/docs/AI-GATEWAY-PLAN.md
+/.mcp.json
