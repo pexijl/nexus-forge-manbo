@@ -5,7 +5,7 @@ import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
+import com.nexusforge.ai.DeltaToolCall;
 import tools.jackson.databind.JsonNode;
 
 import java.io.BufferedReader;
@@ -144,7 +144,7 @@ public class OpenAiStreamParser {
             if (line.startsWith("data:")) {
                 String rest = line.substring("data:".length()).trim();
                 if (!rest.isEmpty()) {
-                    if (dataBuf.length() > 0) dataBuf.append('\n');
+                    if (!dataBuf.isEmpty()) dataBuf.append('\n');
                     dataBuf.append(rest);
                 }
             }
@@ -153,7 +153,7 @@ public class OpenAiStreamParser {
         if (dataBuf.isEmpty()) {
             return null;     // 心跳或空事件
         }
-        if ("[DONE]".equals(dataBuf.toString())) {
+        if ("[DONE]".contentEquals(dataBuf)) {
             return null;     // 终止信号
         }
         return parseDataLine(dataBuf.toString());
@@ -161,9 +161,15 @@ public class OpenAiStreamParser {
 
     /**
      * 单条 data 载荷解码为 ChatChunk。OpenAI 流式 chunk 结构:
-     *   { "id": "...", "model": "...", "choices": [ { "delta": { "content": "..." }, "finish_reason": null|"stop"|"length" } ],
+     *   { "id": "...", "model": "...", "choices": [ { "delta": { "content": "...",
+     *                                                        "tool_calls": [{index, id, function:{name, arguments}}] },
+     *                                                  "finish_reason": null|"stop"|"length"|"tool_calls" } ],
      *     "usage": {prompt_tokens, completion_tokens, total_tokens}        ← 只在最后一帧出现
      *   }
+     *
+     * <p>P4 扩展:同时提取 {@code delta.tool_calls[]} 为 {@link DeltaToolCall} 列表,
+     * 后续由 {@code FunctionCallAggregator} 按 index 聚合为完整 ToolCall。
+     * {@code arguments} 字段是 JSON 字符串分片,逐帧拼接后由 aggregator 整体 parse 成 JsonNode。
      */
     ChatChunk parseDataLine(String data) {
         try {
@@ -177,8 +183,31 @@ public class OpenAiStreamParser {
                         ? null
                         : choice0.path("delta").path("content").asString();
                 b.deltaContent(content == null ? "" : content);
-                String fr = choice0.path("finish_reason").asText("");
+                String fr = choice0.path("finish_reason").asString("");
                 if (!fr.isEmpty() && !"null".equals(fr)) b.finishReason(fr);
+            }
+            // P4:delta.tool_calls[] 流式增量解析(OpenAI 协议特有)
+            JsonNode deltaTcs = choice0.path("delta").path("tool_calls");
+            if (deltaTcs.isArray() && !deltaTcs.isEmpty()) {
+                java.util.List<com.nexusforge.ai.DeltaToolCall> deltas = new java.util.ArrayList<>();
+                for (JsonNode one : deltaTcs) {
+                    Integer idx = one.has("index") && !one.path("index").isNull()
+                            ? one.path("index").asInt() : null;
+                    String id = one.has("id") && !one.path("id").isNull()
+                            ? one.path("id").asString() : null;
+                    JsonNode fn = one.path("function");
+                    String name = fn.has("name") && !fn.path("name").isNull()
+                            ? fn.path("name").asString() : null;
+                    String argsChunk = fn.has("arguments") && !fn.path("arguments").isNull()
+                            ? fn.path("arguments").asString() : null;
+                    deltas.add(com.nexusforge.ai.DeltaToolCall.builder()
+                            .index(idx)
+                            .id(id)
+                            .name(name)
+                            .argumentsChunk(argsChunk)
+                            .build());
+                }
+                b.deltaToolCalls(deltas);
             }
             JsonNode usage = root.path("usage");
             if (!usage.isMissingNode() && !usage.isNull() && usage.isObject()) {
