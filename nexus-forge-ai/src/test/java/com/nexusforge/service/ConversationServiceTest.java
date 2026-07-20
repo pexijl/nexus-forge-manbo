@@ -4,6 +4,7 @@ import com.nexusforge.ai.ChatMessage;
 import com.nexusforge.ai.ChatResponse;
 import com.nexusforge.ai.ChatUsage;
 import com.nexusforge.ai.Role;
+import com.nexusforge.ai.ToolCall;
 import com.nexusforge.client.LlmClient;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
@@ -62,6 +63,8 @@ class ConversationServiceTest {
     @Mock AiMessageUsageRepository usageRepo;
     @Mock LlmClient llmClient;
     @Mock ContextWindowBuilder contextBuilder;
+    /** P4 Step 11:用于序列化 ChatResponse.toolCalls → AiMessage.toolCalls JSON 列。 */
+    @Mock tools.jackson.databind.ObjectMapper objectMapper;
 
     @InjectMocks ConversationService service;
 
@@ -160,6 +163,65 @@ class ConversationServiceTest {
         // 验证:save 调用 2 次(user + assistant),usage save 调用 1 次
         verify(messageRepo, times(2)).save(any(AiMessage.class));
         verify(usageRepo).save(any(AiMessageUsage.class));
+    }
+
+    @Test
+    @DisplayName("sendMessage: assistant 触发 tool_calls → JSON 序列化 + VO 携带 toolCalls")
+    void sendMessage_persists_tool_calls_json() throws Exception {
+        AiConversation conv = baseConv();
+
+        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
+        when(messageRepo.findMaxSeq(1L)).thenReturn(-1);
+        when(messageRepo.findByConversationIdOrderBySeqAsc(1L)).thenReturn(List.of());
+
+        AiMessage userSaved = newMessage(10L, 0, Role.USER.name(), "查北京天气");
+        AiMessage aiSaved = newMessage(11L, 1, Role.ASSISTANT.name(), null);
+        when(messageRepo.save(any(AiMessage.class)))
+                .thenReturn(userSaved)
+                .thenReturn(aiSaved);
+
+        when(contextBuilder.build(any(), eq("openai:gpt-4o-mini")))
+                .thenReturn(List.of(ChatMessage.builder().role(Role.USER).content("查北京天气").build()));
+
+        ToolCall tc = ToolCall.builder()
+                .id("call_abc")
+                .name("get_weather")
+                .arguments(new tools.jackson.databind.ObjectMapper()
+                        .readTree("{\"city\":\"Beijing\"}"))
+                .build();
+        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+                .id("resp-2")
+                .model("gpt-4o-mini")
+                .content(null)  // tool_calls 终止时 content 通常为 null
+                .usage(ChatUsage.builder().promptTokens(20).completionTokens(5).totalTokens(25).build())
+                .finishReason("tool_calls")
+                .toolCalls(List.of(tc))
+                .build());
+
+        // 关键:ObjectMapper.writeValueAsString 被调用,返回固定 JSON 字符串
+        when(objectMapper.writeValueAsString(any())).thenReturn(
+                "[{\"id\":\"call_abc\",\"name\":\"get_weather\",\"arguments\":{\"city\":\"Beijing\"}}]");
+
+        SendMessageDto dto = new SendMessageDto();
+        dto.setContent("查北京天气");
+
+        MessageVo vo = service.sendMessage(100L, 1L, dto);
+
+        // 1. assistant message.tool_calls 列被写入 JSON
+        ArgumentCaptor<AiMessage> msgCaptor = ArgumentCaptor.forClass(AiMessage.class);
+        verify(messageRepo, times(2)).save(msgCaptor.capture());
+        AiMessage persistedAssistant = msgCaptor.getAllValues().get(1);
+        assertThat(persistedAssistant.getToolCalls())
+                .isEqualTo("[{\"id\":\"call_abc\",\"name\":\"get_weather\",\"arguments\":{\"city\":\"Beijing\"}}]");
+
+        // 2. VO 携带 toolCalls(类型 List<ToolCall>)
+        assertThat(vo.getToolCalls()).isNotNull();
+        assertThat(vo.getToolCalls()).hasSize(1);
+        assertThat(vo.getToolCalls().get(0).getId()).isEqualTo("call_abc");
+        assertThat(vo.getToolCalls().get(0).getName()).isEqualTo("get_weather");
+
+        // 3. JSON 序列化被调用 1 次
+        verify(objectMapper, times(1)).writeValueAsString(any());
     }
 
     @Test

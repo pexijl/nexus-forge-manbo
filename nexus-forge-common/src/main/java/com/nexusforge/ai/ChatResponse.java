@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * 大模型对话响应返回实体
  * 封装AI对话接口返回的全部结果信息，包含生成内容、消耗Token、结束原因、耗时等数据
@@ -47,4 +49,11 @@ public class ChatResponse {
      * content_filter：内容安全拦截；error：服务异常失败
      */
     private String finishReason;
+
+    /**
+     * 工具调用列表，仅当 finishReason=tool_calls 时携带。
+     * 流式路径下由 FunctionCallAggregator 在终止帧聚合输出；
+     * 同步路径由 OpenAiJsonMapper.fromOpenAi 直接从 message.tool_calls 提取。
+     */
+    private List<ToolCall> toolCalls;
 }

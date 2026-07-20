@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,10 +33,15 @@ public class ConversationService {
     private final AiMessageUsageRepository usageRepo;
     private final LlmClient llmClient;
     private final ContextWindowBuilder contextBuilder;
+    /**
+     * P4 Step 11:把 {@link ChatResponse#getToolCalls()} 序列化为 JSON 写入
+     * {@link AiMessage#getToolCalls()} 列。这里用 {@code tools.jackson} 包路径
+     * 与 Spring 7 Boot 默认 {@code tools.jackson.databind.ObjectMapper} bean 一致。
+     */
+    private final ObjectMapper objectMapper;
 
     // ──────────────────────────────────────────────
     // 创建会话
-    // ──────────────────────────────────────────────
 
     /**
      * 创建新对话。可选传入 system prompt 作为首条消息。
@@ -111,6 +117,20 @@ public class ConversationService {
         aiMsg.setRole(Role.ASSISTANT.name());
         aiMsg.setContent(response.getContent());
         aiMsg.setSeq(nextSeq + 1);
+        // P4 Step 11:assistant 触发工具调用时,把 tool_calls 序列化为 JSON 写入专用列。
+        // 当前不执行工具、不重入 LLM —— 完整 function-calling 循环是后续 Step 12+。
+        // 此处仅做"曝光":对话详情接口能读到 assistant 选择调用了哪些工具、入参是什么。
+        String toolCallsJson = null;
+        if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
+            try {
+                toolCallsJson = objectMapper.writeValueAsString(response.getToolCalls());
+                aiMsg.setToolCalls(toolCallsJson);
+            } catch (Exception e) {
+                // JSON 序列化失败不应阻塞消息持久化,只记日志
+                log.warn("[AI] tool_calls JSON 序列化失败: convId={}, seq={}, err={}",
+                        conversationId, aiMsg.getSeq(), e.toString());
+            }
+        }
         messageRepo.save(aiMsg);
 
         // 6. 持久化 token 用量
@@ -132,11 +152,12 @@ public class ConversationService {
             conv.setTitle(autoTitle);
         }
 
-        log.info("[AI] 消息已处理: convId={}, seq={}, tokens={}",
+        log.info("[AI] 消息已处理: convId={}, seq={}, tokens={}, toolCalls={}",
                 conversationId, aiMsg.getSeq(),
-                response.getUsage() != null ? response.getUsage().getTotalTokens() : "N/A");
+                response.getUsage() != null ? response.getUsage().getTotalTokens() : "N/A",
+                toolCallsJson != null ? "yes" : "no");
 
-        return toMessageVo(aiMsg, response.getUsage());
+        return toMessageVo(aiMsg, response.getUsage(), response.getToolCalls());
     }
 
     // ──────────────────────────────────────────────
@@ -258,6 +279,16 @@ public class ConversationService {
             uv.setTotalTokens(usage.getTotalTokens());
             vo.setUsage(uv);
         }
+        return vo;
+    }
+
+    /**
+     * P4 Step 11:同步路径下,assistant 回复触发了 tool_calls 时,把列表一并带到 VO;
+     * 流式路径(暂无 sendMessage 调用方)暂未触发此路径。
+     */
+    private MessageVo toMessageVo(AiMessage msg, ChatUsage usage, java.util.List<ToolCall> toolCalls) {
+        MessageVo vo = toMessageVo(msg, usage);
+        vo.setToolCalls(toolCalls);
         return vo;
     }
 
