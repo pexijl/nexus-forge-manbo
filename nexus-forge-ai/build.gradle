@@ -30,6 +30,8 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.junit.jupiter:junit-jupiter-params'
     testImplementation 'com.squareup.okhttp3:mockwebserver3-junit5:5.4.0'
+    // P4 Step 9: stream 降级集成测试用 StepVerifier 断言 Flux 输出
+    testImplementation 'io.projectreactor:reactor-test'
     testImplementation 'org.assertj:assertj-core'
 }
 
