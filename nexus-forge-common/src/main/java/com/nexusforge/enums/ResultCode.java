@@ -45,7 +45,9 @@ public enum ResultCode {
     LLM_PROVIDER_ERROR(3004, "LLM 服务商返回错误"),
     LLM_UPSTREAM_TIMEOUT(3005, "LLM 上游响应超时"),
     LLM_RATE_LIMITED(3006, "LLM 请求被速率限制"),
-    LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽");
+    LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽"),
+    LLM_ALL_VENDORS_FAILED(3008, "所有降级链均失败"),
+    LLM_CIRCUIT_OPEN(3009, "降级链已熔断,暂不可用");
 
     private final Integer code;
     private final String message;
@@ -53,5 +55,17 @@ public enum ResultCode {
     ResultCode(Integer code, String message) {
         this.code = code;
         this.message = message;
+    }
+
+    /**
+     * 通过 Integer code 反查枚举项,找不到返回 {@link #INTERNAL_ERROR}。
+     * 用于 {@link com.nexusforge.exception.BaseException#getCode()} 拿到的 Integer 后做枚举映射。
+     */
+    public static ResultCode fromCodeValue(Integer code) {
+        if (code == null) return INTERNAL_ERROR;
+        for (ResultCode c : values()) {
+            if (c.code.equals(code)) return c;
+        }
+        return INTERNAL_ERROR;
     }
 }
