@@ -27,6 +27,7 @@ import java.time.Duration;
 @ConditionalOnProperty(name = "spring.ai.providers.anthropic.enabled", havingValue = "true")
 public class AnthropicChatModel implements ChatModel {
 
+    private final AiProperties props;
     private final AiProperties.OpenAiCompatible cfg;
     private final AnthropicJsonMapper mapper;
     private final ObjectMapper json;
@@ -42,13 +43,13 @@ public class AnthropicChatModel implements ChatModel {
             throw new LlmException(com.nexusforge.enums.ResultCode.LLM_CONFIG_MISSING,
                     "providers.anthropic 未配置或禁用");
         }
+        this.props = props;
         this.cfg = toOpenAiCompatible(p);
         this.json = json;
         this.mapper = new AnthropicJsonMapper(json);
         this.http = http;
         this.streamParser = streamParser;
         JdkClientHttpConnector connector = new JdkClientHttpConnector(http.httpClient("anthropic"));
-        connector.setReadTimeout(props.getRequestTimeout());
         this.webClient = WebClient.builder().clientConnector(connector).build();
     }
 
@@ -87,7 +88,10 @@ public class AnthropicChatModel implements ChatModel {
         } catch (LlmException e) {
             throw e;
         } catch (Exception e) {
-            throw new LlmException(com.nexusforge.enums.ResultCode.LLM_PROVIDER_ERROR, e.getMessage());
+            LlmException ex = new LlmException(com.nexusforge.enums.ResultCode.LLM_PROVIDER_ERROR,
+                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            ex.initCause(e);
+            throw ex;
         }
     }
 
@@ -116,6 +120,7 @@ public class AnthropicChatModel implements ChatModel {
 
     private Duration props(ChatRequest req) {
         // 复用 AiProperties.requestTimeout;不传则兜底 60s
-        return null;
+        Duration d = props.getRequestTimeout();
+        return d == null ? Duration.ofSeconds(60) : d;
     }
 }
