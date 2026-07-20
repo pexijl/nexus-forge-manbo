@@ -11,6 +11,7 @@ import com.nexusforge.ai.ToolDefinition;
 import com.nexusforge.config.AiProperties;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
+import com.nexusforge.error.StreamTimeoutException;
 import com.nexusforge.model.ChatCapabilities;
 import com.nexusforge.model.ChatModel;
 import com.nexusforge.router.ChatModelRouter;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +88,22 @@ class LlmClientTest {
         }
     }
 
+    /** 永不发射的 ChatModel:用于验证 Flux.timeout 后 LlmClient 把 TimeoutException 转成 StreamTimeoutException */
+    static final class NeverStreamChatModel implements ChatModel {
+        final String vendorName;
+        NeverStreamChatModel(String vendorName) { this.vendorName = vendorName; }
+        @Override public String name() { return vendorName; }
+        @Override public ChatCapabilities capabilities() {
+            return ChatCapabilities.builder().stream(true).tools(false).build();
+        }
+        @Override public ChatResponse call(ChatRequest request) {
+            throw new UnsupportedOperationException("NeverStreamChatModel.call");
+        }
+        @Override public Flux<ChatChunk> stream(ChatRequest request) {
+            return Flux.never();
+        }
+    }
+
     private RecordingChatModel openai;
     private RecordingChatModel ollama;
     private AiProperties props;
@@ -115,7 +133,7 @@ class LlmClientTest {
         models.put("openai", openai);
         models.put("ollama", ollama);
         router = new ChatModelRouter(models, props);
-        client = new LlmClient(router);
+        client = new LlmClient(router, props);
     }
 
     // ─── call() 主路径 ─────────────────────────────────────────────
@@ -234,6 +252,47 @@ class LlmClientTest {
             assertThat(ollama.lastSeenRequest.getModel()).isEqualTo("llama3");
             assertThat(ollama.lastSeenRequest.getStream()).isTrue();
         }
+
+        @Test
+        @DisplayName("stream: 上游从不发射 → Flux.timeout 后抛 StreamTimeoutException")
+        void stream_propagates_timeout_when_upstream_never_emits() {
+            // 单独构造 client:用 NeverStreamChatModel 让流永不结束
+            NeverStreamChatModel slow = new NeverStreamChatModel("openai");
+            java.util.Map<String, ChatModel> models = new HashMap<>();
+            models.put("openai", slow);
+            AiProperties fast = new AiProperties();
+            fast.setDefaultVendor("openai");
+            fast.setDefaultModel("gpt-4o-mini");
+            fast.setRequestTimeout(Duration.ofMillis(300));    // 短超时,让测试快
+            AiProperties.Provider p = new AiProperties.Provider();
+            p.setEnabled(true);
+            p.setDefaultModel("gpt-4o-mini");
+            fast.getProviders().put("openai", p);
+            ChatModelRouter r = new ChatModelRouter(models, fast);
+            LlmClient c = new LlmClient(r, fast);
+
+            ChatRequest req = ChatRequest.builder()
+                    .model("openai:gpt-4o-mini")
+                    .messages(List.of(ChatMessage.builder().role(Role.USER).content("hi").build()))
+                    .build();
+
+            assertThatThrownBy(() -> c.stream(req).collectList().block(Duration.ofSeconds(2)))
+                    .isInstanceOf(StreamTimeoutException.class)
+                    .hasMessageContaining("流式调用超过 300ms");
+        }
+
+        @Test
+        @DisplayName("stream: doFinally 信号日志在 complete 时不抛(隐式验证 doFinally 钩子)")
+        void stream_logs_signal_on_complete_without_throwing() {
+            // 沿用 setup() 的 client(RecordingChatModel 立即发射 1 个 chunk 后 complete)
+            ChatRequest req = ChatRequest.builder()
+                    .model("openai:gpt-4o-mini")
+                    .messages(List.of(ChatMessage.builder().role(Role.USER).content("hi").build()))
+                    .build();
+            // 不抛 = pass;doFinally 的 signal=complete 日志是副作用,这里只验证副作用不破坏流
+            List<ChatChunk> got = client.stream(req).collectList().block();
+            assertThat(got).hasSize(1);
+        }
     }
 
     // ─── 异常 / 边界 ──────────────────────────────────────────────
@@ -277,7 +336,7 @@ class LlmClientTest {
             Map<String, ChatModel> models = new HashMap<>();
             models.put("openai", fresh);
             ChatModelRouter freshRouter = new ChatModelRouter(models, props);
-            LlmClient freshClient = new LlmClient(freshRouter);
+            LlmClient freshClient = new LlmClient(freshRouter, props);
 
             // 不抛就是过
             ChatResponse r = freshClient.call(req("openai:gpt-4o-mini"));

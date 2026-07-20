@@ -1,6 +1,7 @@
 package com.nexusforge.config;
 
 import com.nexusforge.filter.JwtAuthenticationFilter;
+import com.nexusforge.filter.JwtQueryTokenFilter;
 import com.nexusforge.handler.JsonAuthHandlers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -26,6 +27,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
+    private final JwtQueryTokenFilter jwtQueryTokenFilter;
     private final CorsConfigurationSource corsConfigurationSource;
     private final JsonAuthHandlers jsonAuthHandlers;
 
@@ -68,8 +70,12 @@ public class SecurityConfig {
                         .authenticationEntryPoint(jsonAuthHandlers)  // 未认证 → 401
                         .accessDeniedHandler(jsonAuthHandlers) // 权限不足 → 403
                 )
-                // JWT 过滤器插在 UsernamePasswordAuthenticationFilter 之前
-                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                // 必须先注册 JwtAuthenticationFilter(锚点是 UsernamePasswordAuthenticationFilter,
+                // Spring Security 7 要求 anchor 在 FilterOrderRegistration 里存在),
+                // 然后再用 JwtAuthenticationFilter 作 anchor 注册 JwtQueryTokenFilter。
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                // SSE 专用:query token 鉴权,只对 /api/ai/chat/stream 生效
+                .addFilterBefore(jwtQueryTokenFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -32,8 +32,8 @@ import reactor.core.publisher.Flux;
  * {@code spring.ai.providers.openai.api-key=mock-key} 让 {@link com.nexusforge.config.AiProperties.Provider}
  * 在 {@code providers.openai} map 里以"启用"姿态出现,满足路由器的 vendor 启用前置校验。
  *
- * <p>流式接口在 P1 mock 里直接抛 {@link UnsupportedOperationException};
- * 流式 SSE 的 IT 由 P2 单独提供。
+ * <p>流式接口(P2):逐字符回显,最后一片携带 finishReason + usage,模拟 OpenAI 风格 SSE 流;
+ * 长度 0 输入只发一个 finish 帧,不触发 chunk。
  */
 @TestConfiguration
 public class MockChatModel {
@@ -76,10 +76,29 @@ public class MockChatModel {
         }
 
         @Override public Flux<ChatChunk> stream(ChatRequest request) {
-            return Flux.error(new UnsupportedOperationException(
-                    "MockChatModel 不支持 stream();P2 再提供流式 mock"));
+            String echoed = echoOf(request.getMessages());
+            java.util.List<ChatChunk> chunks = new java.util.ArrayList<>(echoed.length() + 1);
+            for (int i = 0; i < echoed.length(); i++) {
+                chunks.add(ChatChunk.builder()
+                        .id("mock-stream")
+                        .model("mock-openai-model")
+                        .deltaContent(String.valueOf(echoed.charAt(i)))
+                        .build());
+            }
+            chunks.add(ChatChunk.builder()
+                    .id("mock-stream-finish")
+                    .model("mock-openai-model")
+                    .finishReason("stop")
+                    .usage(com.nexusforge.ai.ChatUsage.builder()
+                            .promptTokens(3)
+                            .completionTokens(echoed.length())
+                            .totalTokens(3 + echoed.length())
+                            .build())
+                    .build());
+            return Flux.interval(java.time.Duration.ofMillis(10))
+                    .take(chunks.size())
+                    .map(i -> chunks.get(i.intValue()));
         }
-
         private static String echoOf(java.util.List<ChatMessage> messages) {
             if (messages == null || messages.isEmpty()) return "echo:";
             ChatMessage lastUser = null;

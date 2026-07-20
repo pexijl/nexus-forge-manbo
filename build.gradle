@@ -41,11 +41,12 @@ subprojects {
 	// 统一管理依赖版本
 	ext {
 		springdocVersion = '3.0.3'
+		reactorNettyVersion = '1.2.6'
 	}
-
 	dependencyManagement {
 		dependencies {
 			dependency "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdocVersion}"
+			dependency "io.projectreactor.netty:reactor-netty-core:${reactorNettyVersion}"
 		}
 	}
 

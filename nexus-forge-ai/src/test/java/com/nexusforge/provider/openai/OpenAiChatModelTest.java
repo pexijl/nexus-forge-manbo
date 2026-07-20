@@ -1,6 +1,7 @@
 package com.nexusforge.provider.openai;
 
 import com.nexusforge.ai.ChatMessage;
+import com.nexusforge.ai.ChatChunk;
 import com.nexusforge.ai.ChatRequest;
 import com.nexusforge.ai.ChatResponse;
 import com.nexusforge.ai.Role;
@@ -8,6 +9,7 @@ import com.nexusforge.config.AiProperties;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
 import com.nexusforge.model.ChatCapabilities;
+import com.nexusforge.stream.OpenAiStreamParser;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import mockwebserver3.RecordedRequest;
@@ -45,6 +47,7 @@ class OpenAiChatModelTest {
     private AiProperties props;
     private ObjectMapper json = new ObjectMapper();
     private OpenAiJsonMapper mapper;
+    private OpenAiStreamParser streamParser;
     private OpenAiChatModel model;
 
     @BeforeEach
@@ -63,7 +66,8 @@ class OpenAiChatModelTest {
         props.setRequestTimeout(Duration.ofSeconds(2));
 
         mapper = new OpenAiJsonMapper(json);
-        model = new OpenAiChatModel(props, json, mapper);
+        streamParser = new OpenAiStreamParser();
+        model = new OpenAiChatModel(props, json, mapper, streamParser);
     }
 
     @AfterEach
@@ -272,7 +276,7 @@ class OpenAiChatModelTest {
         @DisplayName("providers.openai 段缺失 → 构造抛 LLM_CONFIG_MISSING")
         void missing_openai_provider_section_throws_on_construction() {
             AiProperties propsWithoutOpenAi = new AiProperties();
-            assertThatThrownBy(() -> new OpenAiChatModel(propsWithoutOpenAi, json, mapper))
+            assertThatThrownBy(() -> new OpenAiChatModel(propsWithoutOpenAi, json, mapper, streamParser))
                     .isInstanceOfSatisfying(LlmException.class, e ->
                             assertThat(e.getCode()).isEqualTo(ResultCode.LLM_CONFIG_MISSING.getCode()));
         }
@@ -284,7 +288,7 @@ class OpenAiChatModelTest {
             AiProperties.Provider p = new AiProperties.Provider();
             p.setEnabled(false);
             props2.getProviders().put("openai", p);
-            assertThatThrownBy(() -> new OpenAiChatModel(props2, json, mapper))
+            assertThatThrownBy(() -> new OpenAiChatModel(props2, json, mapper, streamParser))
                     .isInstanceOfSatisfying(LlmException.class, e ->
                             assertThat(e.getCode()).isEqualTo(ResultCode.LLM_CONFIG_MISSING.getCode()));
         }
@@ -299,7 +303,7 @@ class OpenAiChatModelTest {
             p.setBaseUrl(server.url("/v1").toString().replaceAll("/$", ""));
             p.setDefaultModel("gpt-4o-mini");
             props2.getProviders().put("openai", p);
-            new OpenAiChatModel(props2, json, mapper);
+            new OpenAiChatModel(props2, json, mapper, streamParser);
         }
 
         @Test
@@ -311,7 +315,7 @@ class OpenAiChatModelTest {
             p.setApiKey("k-test");
             p.setDefaultModel("gpt-4o-mini");
             props2.getProviders().put("openai", p);
-            OpenAiChatModel m = new OpenAiChatModel(props2, json, mapper);
+            OpenAiChatModel m = new OpenAiChatModel(props2, json, mapper, streamParser);
             assertThat(m).isNotNull();
         }
     }
@@ -337,15 +341,22 @@ class OpenAiChatModelTest {
             assertThat(cap.isJsonMode()).isTrue();
         }
         @Test
-        @DisplayName("stream(ChatRequest) 在 P1 返回 Flux.error(LLM_INVALID_REQUEST),订阅时抛 LlmException")
-        void stream_is_not_implemented_in_p1() {
-            // Flux.error(...) 是 lazy 的 —— 不订阅不会抛。需要 .blockFirst() 触发
-            try {
-                model.stream(sampleRequest("hi")).blockFirst();
-                org.junit.jupiter.api.Assertions.fail("期望 stream 抛 LlmException,但未抛");
-            } catch (LlmException ex) {
-                assertThat(ex.getCode()).isEqualTo(ResultCode.LLM_INVALID_REQUEST.getCode());
-            }
+        @DisplayName("stream(ChatRequest) 在 P2 返回 ChatChunk 流:解析 OpenAI SSE 帧 → 业务单元")
+        void stream_returns_parsed_chunks_from_sse_response() throws Exception {
+            server.enqueue(new MockResponse.Builder()
+                    .status("HTTP/1.1 200 OK")
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body("data: {\"id\":\"cmpl-1\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n"
+                        + "data: {\"id\":\"cmpl-1\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\n"
+                        + "data: [DONE]\n\n")
+                    .build());
+            java.util.List<ChatChunk> chunks = new java.util.ArrayList<>();
+            Throwable[] err = {null};
+            model.stream(sampleRequest("hi"))
+                    .doOnError(e -> err[0] = e)
+                    .doOnNext(chunks::add)
+                    .blockLast(java.time.Duration.ofSeconds(5));
+            if (err[0] != null) throw new AssertionError("stream errored", err[0]);
         }
     }
 }
