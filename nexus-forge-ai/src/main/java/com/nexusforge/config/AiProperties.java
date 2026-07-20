@@ -2,12 +2,13 @@ package com.nexusforge.config;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -115,4 +116,40 @@ public class AiProperties {
     @Data
     @EqualsAndHashCode(callSuper = false)
     public static class OpenAi extends Provider {}
+
+    @Data
+    public static class Retry {
+        /** 重试上限(含首次,默认 3 表示最多 3 次) */
+        private int maxAttempts = 3;
+        /** 初始退避 */
+        private Duration initialBackoff = Duration.ofSeconds(1);
+        /** 退避倍数 */
+        private double multiplier = 2.0;
+        /** 退避上限 */
+        private Duration maxBackoff = Duration.ofSeconds(8);
+    }
+
+    @Data
+    public static class CircuitBreaker {
+        /** 窗口期内失败次数上限 */
+        private int failureThreshold = 5;
+        /** 窗口大小 */
+        private Duration windowSize = Duration.ofSeconds(60);
+        /** OPEN → HALF_OPEN 等待时长 */
+        private Duration halfOpenAfter = Duration.ofSeconds(30);
+    }
+
+    @NestedConfigurationProperty
+    private Retry retry = new Retry();
+
+    @NestedConfigurationProperty
+    private CircuitBreaker circuitBreaker = new CircuitBreaker();
+
+    /** 降级链,空表示不降级,只走首选 */
+    private List<String> fallbackChain = new ArrayList<>();
+
+    /** 全降级链用尽时抛的 ResultCode */
+    public static class OpenAiCompatible extends Provider {
+        // 现有 OpenAi 的全部字段保留;各国产 / Ollama 都 extend 这个
+    }
 }
