@@ -36,7 +36,16 @@ public enum ResultCode {
     RATE_LIMITED(2009, "请求过于频繁，请稍后再试"),
     AVATAR_UPLOAD_FAILED(2010, "头像上传失败"),
     OLD_PASSWORD_INCORRECT(2011, "旧密码不正确"),
-    NEW_PASSWORD_SAME_AS_OLD(2012, "新密码不能与旧密码相同");
+    NEW_PASSWORD_SAME_AS_OLD(2012, "新密码不能与旧密码相同"),
+
+    // AI 网关
+    LLM_CONFIG_MISSING(3001, "LLM 配置缺失"),
+    LLM_MODEL_NOT_FOUND(3002, "模型不存在或未启用"),
+    LLM_INVALID_REQUEST(3003, "LLM 请求参数无效"),
+    LLM_PROVIDER_ERROR(3004, "LLM 服务商返回错误"),
+    LLM_UPSTREAM_TIMEOUT(3005, "LLM 上游响应超时"),
+    LLM_RATE_LIMITED(3006, "LLM 请求被速率限制"),
+    LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽");
 
     private final Integer code;
     private final String message;
