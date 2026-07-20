@@ -12,30 +12,37 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j
 @RestController
 @RequestMapping("/api/ai")
 @RequiredArgsConstructor
-@Tag(name = "AI Gateway", description = "LLM 网关入口(P1 仅同步)")
+@Tag(name = "AI Gateway", description = "LLM 网关入口(P1 同步 / P4 增加 tools 透传)")
 @SecurityRequirements   // Swagger 全局已有 bearer,这里不需要重复
 public class AiController {
 
     private final LlmClient client;
+    /**
+     * P4 Step 12:DTO 的 {@code tools} 字段归一化需要 Jackson {@link ObjectMapper}。
+     * Spring Boot 4 默认装配 {@code tools.jackson.databind.ObjectMapper},与
+     * Spring MVC 的 message converter 同源,这里直接注入即可。
+     */
+    private final ObjectMapper objectMapper;
 
-    @Operation(summary = "同步调用 LLM(P1 唯一对外接口)")
+    @Operation(summary = "同步调用 LLM(P1 同步接口,P4 起支持 tools 透传)")
     @PostMapping("/chat")
     public Result<ChatResponse> chat(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody ChatRequestDto dto) {
         log.debug("[AI] user={} model={} stream=false",
                 principal == null ? "anon" : principal.userId(), dto.getModel());
-        ChatResponse resp = client.call(dto.toDomain());
+        ChatResponse resp = client.call(dto.toDomain(objectMapper));
         return Result.success("ok", resp);
     }
 }

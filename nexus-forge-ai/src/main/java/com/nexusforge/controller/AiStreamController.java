@@ -53,7 +53,7 @@ public class AiStreamController {
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setCharacterEncoding("UTF-8");
 
-        ChatRequest request = dto.toDomain();
+        ChatRequest request = dto.toDomain(objectMapper);
         log.info("[AI stream] user={} model={}",
                 principal == null ? "anon" : principal.userId(), request.getModel());
         Flux<ChatChunk> chunks = client.stream(request);
