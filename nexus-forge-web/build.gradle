@@ -20,6 +20,7 @@ dependencies {
     implementation project(':nexus-forge-user')
     implementation project(':nexus-forge-auth')
     implementation project(':nexus-forge-file')
+    implementation project(':nexus-forge-ai')
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
