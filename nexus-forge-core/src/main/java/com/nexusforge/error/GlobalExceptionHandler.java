@@ -89,9 +89,16 @@ public class GlobalExceptionHandler {
     private static HttpStatus mapStatus(Integer code) {
         if (code == null) return HttpStatus.BAD_REQUEST;
         return switch (code) {
-            case 2008 -> HttpStatus.CONFLICT;          // IDEMPOTENT_CONFLICT  -> 409
-            case 2009 -> HttpStatus.TOO_MANY_REQUESTS; // RATE_LIMITED         -> 429
-            default -> HttpStatus.BAD_REQUEST;       // 其余业务异常          -> 400
+            case 2008 -> HttpStatus.CONFLICT;          // IDEMPOTENT_CONFLICT          -> 409
+            case 2009 -> HttpStatus.TOO_MANY_REQUESTS; // RATE_LIMITED                 -> 429
+            case 3001,                              // LLM_CONFIG_MISSING
+                 3002,                              // LLM_MODEL_NOT_FOUND
+                 3003 -> HttpStatus.BAD_REQUEST;    // LLM_INVALID_REQUEST          -> 400
+            case 3006,                              // LLM_RATE_LIMITED
+                 3007 -> HttpStatus.TOO_MANY_REQUESTS; // LLM_QUOTA_EXCEEDED         -> 429
+            case 3004 -> HttpStatus.BAD_GATEWAY;       // LLM_PROVIDER_ERROR          -> 502
+            case 3005 -> HttpStatus.GATEWAY_TIMEOUT;   // LLM_UPSTREAM_TIMEOUT        -> 504
+            default -> HttpStatus.BAD_REQUEST;       // 其余业务异常                 -> 400
         };
     }
 }
