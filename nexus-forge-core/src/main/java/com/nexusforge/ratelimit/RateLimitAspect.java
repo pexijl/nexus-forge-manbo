@@ -29,22 +29,14 @@ public class RateLimitAspect {
         String[] paramNames = signature.getParameterNames();
         Object[] args = pjp.getArgs();
         if (paramNames != null) {
-            for (int i = 0; i < args.length; i++) {
-                ctx.setVariable(paramNames[i], args[i]);
-            }
+            for (int i = 0; i < args.length; i++) ctx.setVariable(paramNames[i], args[i]);
         }
         HttpServletRequest req = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
         ctx.setVariable("ip", req.getRemoteAddr());
         String raw = parser.parseExpression(anno.key()).getValue(ctx, String.class);
         String key = "rl:" + raw;
-        log.info("[RateLimit] key={} path={} method={}",
-                key, req.getRequestURI(), req.getMethod());  // ← 加这行
         if (!rateLimiter.tryAcquire(key, anno)) {
-            log.warn("[RateLimit] BLOCKED key={} path={} ip={}",
-                    key, req.getRequestURI(), req.getRemoteAddr());  // ← 拦截时再打一条
-            throw new RateLimitException(anno.message());
-        }
-        if (!rateLimiter.tryAcquire(key, anno)) {
+            log.warn("[RateLimit] BLOCKED key={} path={} ip={}", key, req.getRequestURI(), req.getRemoteAddr());
             throw new RateLimitException(anno.message());
         }
         return pjp.proceed();
