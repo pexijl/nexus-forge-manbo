@@ -18,6 +18,16 @@ spring:
       max-file-size: 5MB          # 单文件上限（头像 5MB 够用）
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+  ai:
+    preference:
+      master-key: ${SPRING_AI_PREFERENCE_MASTER_KEY:}  # 不配则降级用 jwt.secret(生产建议显式配独立密钥)
+
+
 
 server:
   tomcat:
