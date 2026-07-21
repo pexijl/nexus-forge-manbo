@@ -3,11 +3,13 @@ package com.nexusforge.controller;
 import com.nexusforge.ai.ChatChunk;
 import com.nexusforge.ai.ChatRequest;
 import com.nexusforge.client.LlmClient;
+import com.nexusforge.client.RateLimitGuard;
 import com.nexusforge.controller.dto.ChatRequestDto;
 import com.nexusforge.security.UserPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -42,21 +44,29 @@ public class AiStreamController {
 
     private final LlmClient client;
     private final ObjectMapper objectMapper;
+    /** P5 Step 7:动态限流(userId + IP 维度) */
+    private final RateLimitGuard rateLimitGuard;
 
     @Operation(summary = "流式调用 LLM(P2,SSE)")
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public StreamingResponseBody stream(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody ChatRequestDto dto,
-            HttpServletResponse response) {
+            HttpServletResponse response,
+            HttpServletRequest request) {
+        // P5 Step 7:限流(userId + IP)
+        rateLimitGuard.check(
+                principal == null ? null : principal.userId(),
+                request.getRemoteAddr());
+
         // StreamingResponseBody 的 produces 不自动写 Content-Type;需手动设
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setCharacterEncoding("UTF-8");
 
-        ChatRequest request = dto.toDomain(objectMapper);
+        ChatRequest req = dto.toDomain(objectMapper);
         log.info("[AI stream] user={} model={}",
-                principal == null ? "anon" : principal.userId(), request.getModel());
-        Flux<ChatChunk> chunks = client.stream(request);
+                principal == null ? "anon" : principal.userId(), req.getModel());
+        Flux<ChatChunk> chunks = client.stream(req);
         return output -> {
             log.info("[AI stream] writeTo called, output class={}", output.getClass().getName());
             writeChunks(output, chunks);
@@ -66,44 +76,43 @@ public class AiStreamController {
 
     private void writeChunks(OutputStream output, Flux<ChatChunk> chunks) {
         try {
-            chunks.doOnNext(chunk -> writeFrame(output, chunk))
-                    .doOnComplete(() -> writeDoneFrame(output))
-                    .doOnError(err -> writeErrorFrame(output, err))
-                    .blockLast();
-            output.flush();
+            chunks.subscribe(
+                    chunk -> writeFrame(output, chunk),
+                    err -> writeErrorFrame(output, err),
+                    () -> writeDoneFrame(output));
+            // 等待流完成
+            chunks.blockLast();
         } catch (Exception e) {
-            log.warn("[AI stream] write error: {}", e.toString());
+            log.warn("[AI stream] chunk 写入异常: {}", e.toString());
         }
     }
 
     private void writeFrame(OutputStream output, ChatChunk chunk) {
         try {
-            StringBuilder sb = new StringBuilder();
-            sb.append("event: delta\n");
-            if (chunk.getId() != null) sb.append("id: ").append(chunk.getId()).append('\n');
-            sb.append("data: ").append(objectMapper.writeValueAsString(chunk)).append("\n\n");
-            output.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+            String json = objectMapper.writeValueAsString(chunk);
+            output.write(("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8));
             output.flush();
-            log.debug("[AI stream] wrote chunk id={}", chunk.getId());
         } catch (IOException e) {
-            throw new RuntimeException("client gone", e);
-        } catch (Exception e) {
-            log.warn("[AI stream] writeFrame error: {}", e.toString());
+            log.warn("[AI stream] frame 写入失败: {}", e.toString());
         }
     }
 
     private static void writeDoneFrame(OutputStream output) {
         try {
-            output.write("event: done\ndata: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+            output.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
             output.flush();
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            // 忽略:客户端可能已断开
+        }
     }
 
     private static void writeErrorFrame(OutputStream output, Throwable err) {
         try {
-            String msg = err.getMessage() == null ? "" : err.getMessage().replace("\n", "\\n");
-            output.write(("event: error\ndata: " + msg + "\n\n").getBytes(StandardCharsets.UTF_8));
+            String msg = "{\"error\":\"" + err.getMessage().replace("\"", "\\\"") + "\"}";
+            output.write(("data: " + msg + "\n\n").getBytes(StandardCharsets.UTF_8));
             output.flush();
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            // 忽略
+        }
     }
 }

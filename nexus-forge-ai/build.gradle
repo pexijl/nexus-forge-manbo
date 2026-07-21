@@ -16,6 +16,7 @@ bootJar { enabled = false }
 // 共存于 MVC 容器不会冲突,Flux 已是 P1 ChatModel.stream 的返回类型,P2 把它用起来。
 dependencies {
     api project(':nexus-forge-common')                  // 域模型、Result、UserPrincipal
+    implementation project(':nexus-forge-core')         // P5 Step 7: RateLimiter + RateLimitException
     implementation 'org.springframework.boot:spring-boot-starter-web'      // MVC
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // @AuthenticationPrincipal 来自 spring-security-core;AI 模块的 controller 解析
