@@ -33,6 +33,12 @@ dependencies {
     // P4 Step 9: stream 降级集成测试用 StepVerifier 断言 Flux 输出
     testImplementation 'io.projectreactor:reactor-test'
     testImplementation 'org.assertj:assertj-core'
+    // P5 Step 1: @DataJpaTest + Testcontainers 跑真实 SQL 测聚合 JPQL。
+    // - starter-test 由根 build.gradle 子项目级统一引入,这里不重复;
+    // - testcontainers-bom 走 platform(...) 模式,与 nexus-forge-web 保持一致。
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
 }
 
 test { useJUnitPlatform() }
