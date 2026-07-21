@@ -63,6 +63,8 @@ class ConversationServiceTest {
     @Mock AiMessageUsageRepository usageRepo;
     @Mock LlmClient llmClient;
     @Mock ContextWindowBuilder contextBuilder;
+    /** P5 Step 4:UsageRecorder 上报 Micrometer 指标,ConversationService 在 save 之后调。 */
+    @Mock com.nexusforge.client.UsageRecorder usageRecorder;
     /** P4 Step 11:用于序列化 ChatResponse.toolCalls → AiMessage.toolCalls JSON 列。 */
     @Mock tools.jackson.databind.ObjectMapper objectMapper;
 
