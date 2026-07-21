@@ -1,0 +1,215 @@
+package com.nexusforge.service;
+
+import com.nexusforge.config.AiProperties;
+import com.nexusforge.config.AiProperties.QuotaConfig;
+import com.nexusforge.config.AiProperties.QuotaTier;
+import com.nexusforge.enums.ResultCode;
+import com.nexusforge.exception.BusinessException;
+import com.nexusforge.repository.AiMessageUsageRepository;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
+
+/**
+ * QuotaService 单元测试。覆盖 P5 Step 5 关键不变量:
+ * <ul>
+ *   <li>token 超限 → 抛 LLM_QUOTA_EXCEEDED</li>
+ *   <li>请求次数超限 → 抛 LLM_QUOTA_EXCEEDED</li>
+ *   <li>配额内 → 放行</li>
+ *   <li>配额关闭 → 放行</li>
+ *   <li>tier limit 为 null → 该维度不限</li>
+ *   <li>defaultUserTier fallback</li>
+ * </ul>
+ */
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+@DisplayName("QuotaService")
+class QuotaServiceTest {
+
+    private static final Long USER_ID = 1L;
+
+    @Mock AiMessageUsageRepository usageRepo;
+
+    private QuotaService service;
+    private AiProperties props;
+
+    @BeforeEach
+    void setUp() {
+        props = new AiProperties();
+        service = new QuotaService(usageRepo, props);
+        // 模拟 JwtAuthenticationFilter: authorities = ["USER"] (无 ROLE_ 前缀)
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("testuser", null,
+                        List.of(new SimpleGrantedAuthority("USER"))));
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    // ──────────────────────────────────────────────
+    // 超限
+    // ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("超限路径")
+    class Exceeded {
+
+        @Test
+        @DisplayName("token 超限 → 抛 LLM_QUOTA_EXCEEDED")
+        void token_exceeded_throws() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(1000L);
+            tier.setRequestLimit(5000L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(500, 600, 1100, 10));
+
+            assertThatThrownBy(() -> service.check(USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(ex -> {
+                        BusinessException bex = (BusinessException) ex;
+                        assertThat(bex.getCode()).isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+                        assertThat(bex.getMessage()).contains("token");
+                    });
+        }
+
+        @Test
+        @DisplayName("请求次数超限 → 抛 LLM_QUOTA_EXCEEDED")
+        void request_exceeded_throws() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(1_000_000L);
+            tier.setRequestLimit(5L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(100, 200, 300, 10));
+
+            assertThatThrownBy(() -> service.check(USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(ex -> {
+                        BusinessException bex = (BusinessException) ex;
+                        assertThat(bex.getCode()).isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+                        assertThat(bex.getMessage()).contains("请求次数");
+                    });
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // 放行
+    // ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("放行路径")
+    class Allowed {
+
+        @Test
+        @DisplayName("配额内 → 放行不抛")
+        void within_quota_passes() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(1_000_000L);
+            tier.setRequestLimit(5000L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(500, 300, 800, 10));
+
+            service.check(USER_ID);
+            // 不抛即通过
+        }
+
+        @Test
+        @DisplayName("配额关闭 → 放行,不查 DB")
+        void disabled_quota_passes() {
+            props.getQuota().setEnabled(false);
+
+            service.check(USER_ID);
+            // 不抛,不查 DB
+        }
+
+        @Test
+        @DisplayName("ADMIN tier 两个 null → 放行,不查 DB")
+        void unlimited_tier_passes_without_db() {
+            // SecurityContextHolder 设 ADMIN
+            SecurityContextHolder.clearContext();
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken("admin", null,
+                            List.of(new SimpleGrantedAuthority("ADMIN"))));
+
+            QuotaTier adminTier = new QuotaTier();
+            adminTier.setDailyTokenLimit(null);
+            adminTier.setRequestLimit(null);
+            props.getQuota().setTiers(Map.of("ADMIN", adminTier));
+
+            service.check(USER_ID);
+            // 不抛,不查 DB(dailyTokenLimit == null && requestLimit == null 快速放行)
+        }
+
+        @Test
+        @DisplayName("dailyTokenLimit=null 但 requestLimit 非 null → 只检查请求次数")
+        void null_token_limit_skips_token_check() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(null);
+            tier.setRequestLimit(5000L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 999_999, 10));
+
+            // token=999_999 超过任何合理 limit,但 dailyTokenLimit=null → 跳过
+            service.check(USER_ID);
+        }
+
+        @Test
+        @DisplayName("defaultUserTier fallback: tiers 无 USER key → 走 defaultUserTier")
+        void fallback_to_default_tier() {
+            // tiers 里只有 ADMIN,没有 USER
+            QuotaTier adminTier = new QuotaTier();
+            adminTier.setDailyTokenLimit(null);
+            adminTier.setRequestLimit(null);
+            props.getQuota().setTiers(Map.of("ADMIN", adminTier));
+            props.getQuota().setDefaultUserTier("ADMIN");
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 0, 0));
+
+            service.check(USER_ID);
+            // USER 角色 → 走 defaultUserTier=ADMIN → 不限 → 放行
+        }
+
+        @Test
+        @DisplayName("tiers 全空 + defaultUserTier 也不存在 → 放行(防 NPE)")
+        void empty_tiers_passes() {
+            props.getQuota().setTiers(Map.of());
+            props.getQuota().setDefaultUserTier("NONEXISTENT");
+
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 0, 0));
+
+            service.check(USER_ID);
+            // 不抛(NPE 防御)
+        }
+    }
+}

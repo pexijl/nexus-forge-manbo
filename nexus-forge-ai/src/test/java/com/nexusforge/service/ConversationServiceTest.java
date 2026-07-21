@@ -65,6 +65,8 @@ class ConversationServiceTest {
     @Mock ContextWindowBuilder contextBuilder;
     /** P5 Step 4:UsageRecorder 上报 Micrometer 指标,ConversationService 在 save 之后调。 */
     @Mock com.nexusforge.client.UsageRecorder usageRecorder;
+    /** P5 Step 5:配额校验。sendMessage 开头调 quotaService.check(userId)。 */
+    @Mock QuotaService quotaService;
     /** P4 Step 11:用于序列化 ChatResponse.toolCalls → AiMessage.toolCalls JSON 列。 */
     @Mock tools.jackson.databind.ObjectMapper objectMapper;
 
