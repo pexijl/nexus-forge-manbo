@@ -1,6 +1,7 @@
 package com.nexusforge.client;
 
 import com.nexusforge.ai.ChatUsage;
+import com.nexusforge.ai.service.PreferenceResolver.KeySource;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -44,6 +45,11 @@ public class UsageRecorder {
     /** "unknown" — model 为 null / 缺失时落到该标签,避免空字符串导致 PromQL 过滤异常 */
     private static final String LABEL_UNKNOWN = "unknown";
 
+    /** 三态 key 源 → metric tag,便于平台用量/私 Key 用量分开统计 */
+    private static final String TAG_SOURCE_SYSTEM = "system";
+    private static final String TAG_SOURCE_OVERRIDE = "override_system";
+    private static final String TAG_SOURCE_PRIVATE = "private";
+
     /**
      * Micrometer 入口。可为 null(未启用 actuator / 单元测试 mock),此时所有方法空跑。
      */
@@ -70,52 +76,77 @@ public class UsageRecorder {
      * 把一次 LLM 调用的 token 消耗上报为 4 个 counter(请求数 + 3 种 token)。
      * 任何入参 null 都安全跳过——不抛、不打 error。
      *
-     * @param usage  LLM 返回的用量,可为 null(vendor 不返回 usage / 流式还未收尾)
-     * @param model  具体模型名(如 {@code gpt-4o-mini}),可为 null(落到 "unknown" 标签)
+     * <p>P7 扩展:多了一个 {@code source} 标签,值 {@code system / override_system / private},
+     * 便于 Grafana 等监控区分"平台承担"与"用户自付"的用量。
+     *
+     * @param usage     LLM 返回的用量,可为 null
+     * @param model     具体模型名
+     * @param keySource 三态 key 源(可传 null,默认 system)
      */
-    public void recordMetrics(ChatUsage usage, String model) {
+    public void recordMetrics(ChatUsage usage, String model, KeySource keySource) {
         if (meterRegistry == null) {
             return;
         }
         String labelModel = model == null ? LABEL_UNKNOWN : model;
-        // 1. 请求数 +1(usage 缺失也照样计,保证"调用次数"是真实请求量,与是否计费无关)
-        meterRegistry.counter(METRIC_REQUESTS, "model", labelModel).increment();
+        String labelSource = sourceTag(keySource);
+        // 1. 请求数 +1
+        meterRegistry.counter(METRIC_REQUESTS, "model", labelModel, "source", labelSource).increment();
         if (usage == null) {
             return;
         }
         // 2. prompt token
         Integer prompt = usage.getPromptTokens();
         if (prompt != null && prompt > 0) {
-            meterRegistry.counter(METRIC_PROMPT_TOKENS, "model", labelModel).increment(prompt);
+            meterRegistry.counter(METRIC_PROMPT_TOKENS, "model", labelModel, "source", labelSource).increment(prompt);
         }
         // 3. completion token
         Integer completion = usage.getCompletionTokens();
         if (completion != null && completion > 0) {
-            meterRegistry.counter(METRIC_COMPLETION_TOKENS, "model", labelModel).increment(completion);
+            meterRegistry.counter(METRIC_COMPLETION_TOKENS, "model", labelModel, "source", labelSource).increment(completion);
         }
-        // 4. total token — 优先用 vendor 给的 total;若 total 缺失用 prompt+completion 兜底,
-        // 保证账单/告警面板拿到的 total 永远有值。
+        // 4. total token
         Integer total = usage.getTotalTokens();
         if (total == null && prompt != null && completion != null) {
             total = prompt + completion;
         }
         if (total != null && total > 0) {
-            meterRegistry.counter(METRIC_TOTAL_TOKENS, "model", labelModel).increment(total);
+            meterRegistry.counter(METRIC_TOTAL_TOKENS, "model", labelModel, "source", labelSource).increment(total);
         }
     }
 
     /**
-     * 一次"进入 sendMessage 但 LLM 调用失败"的请求计数。失败路径不记录 token(无 usage),
-     * 但调用次数必须 +1,否则告警面板会丢失失败请求统计。
-     *
-     * <p>典型调用点:ConversationService.sendMessage 在 {@code lhmClient.call} 抛异常时
-     * 走 finally 块调此方法。
+     * 兼容旧调用,默认 {@link KeySource#SYSTEM}。
+     */
+    public void recordMetrics(ChatUsage usage, String model) {
+        recordMetrics(usage, model, KeySource.SYSTEM);
+    }
+
+    /**
+     * 一次"进入 sendMessage 但 LLM 调用失败"的请求计数。
+     * 失败路径不记录 token(无 usage),但调用次数必须 +1。
      */
     public void recordRequest(String model) {
+        recordRequest(model, KeySource.SYSTEM);
+    }
+
+    /**
+     * P7 个性化版本,失败路径也带 source 标签。
+     */
+    public void recordRequest(String model, KeySource keySource) {
         if (meterRegistry == null) {
             return;
         }
         String labelModel = model == null ? LABEL_UNKNOWN : model;
-        meterRegistry.counter(METRIC_REQUESTS, "model", labelModel).increment();
+        String labelSource = sourceTag(keySource);
+        meterRegistry.counter(METRIC_REQUESTS, "model", labelModel, "source", labelSource).increment();
+    }
+
+    private static String sourceTag(KeySource keySource) {
+        if (keySource == null) return TAG_SOURCE_SYSTEM;
+        return switch (keySource) {
+            case SYSTEM -> TAG_SOURCE_SYSTEM;
+            case USER_OVERRIDE_SYSTEM_KEY -> TAG_SOURCE_OVERRIDE;
+            case USER_PRIVATE_KEY -> TAG_SOURCE_PRIVATE;
+        };
     }
 }

@@ -5,6 +5,7 @@ import com.nexusforge.ai.ChatResponse;
 import com.nexusforge.ai.ChatUsage;
 import com.nexusforge.ai.Role;
 import com.nexusforge.ai.ToolCall;
+import com.nexusforge.ai.service.PreferenceResolver;
 import com.nexusforge.client.LlmClient;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
@@ -20,6 +21,7 @@ import com.nexusforge.exception.BusinessException;
 import com.nexusforge.repository.AiConversationRepository;
 import com.nexusforge.repository.AiMessageRepository;
 import com.nexusforge.repository.AiMessageUsageRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -70,8 +72,30 @@ class ConversationServiceTest {
     @Mock QuotaService quotaService;
     /** P4 Step 11:用于序列化 ChatResponse.toolCalls → AiMessage.toolCalls JSON 列。 */
     @Mock tools.jackson.databind.ObjectMapper objectMapper;
+    /** P7:用户偏好解析器。默认 stub 为 SYSTEM 模式(等价于没有用户偏好、沿用全局默认) */
+    @Mock PreferenceResolver preferenceResolver;
 
     @InjectMocks ConversationService service;
+
+    @BeforeEach
+    void stubPrefResolver() {
+        // 默认所有测试都按"系统 Key 模式"走——vendor 用模型名解析出来的 vendor,Key 用 yaml。
+        lenient().when(preferenceResolver.resolve(any(), any())).thenAnswer(inv -> {
+            Long uid = inv.getArgument(0);
+            String modelField = inv.getArgument(1);
+            String vendor = "openai";
+            String modelName = "gpt-4o-mini";
+            if (modelField != null && !modelField.isBlank() && modelField.contains(":")) {
+                String[] parts = modelField.split(":", 2);
+                vendor = parts[0];
+                modelName = parts[1];
+            }
+            return new PreferenceResolver.Resolved(
+                    vendor, modelName,
+                    /* apiKey */ null, /* fingerprint */ null, /* baseUrl */ null,
+                    PreferenceResolver.KeySource.SYSTEM);
+        });
+    }
 
     // ──────────────────────────────────────────
     // create
@@ -442,8 +466,9 @@ class ConversationServiceTest {
     void sendMessage_quota_exceeded_throws_before_llm() {
         AiConversation conv = baseConv();
         when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
+        // P7:sendMessage 走 3-arg overload,stub 该版本
         org.mockito.Mockito.doThrow(new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED, "配额用尽"))
-                .when(quotaService).check(eq(100L), anyLong());
+                .when(quotaService).check(eq(100L), anyLong(), any());
 
         SendMessageDto dto = new SendMessageDto();
         dto.setContent("这条消息不该到达 LLM");
@@ -485,9 +510,10 @@ class ConversationServiceTest {
 
         service.sendMessage(100L, 1L, dto);
 
-        // usage=null 时应调 recordRequest(model) 而非 recordMetrics
-        verify(usageRecorder).recordRequest("openai:gpt-4o-mini");
+        // usage=null 时应调 recordRequest(model, keySource) 而非 recordMetrics
+        verify(usageRecorder).recordRequest(eq("openai:gpt-4o-mini"), any());
         verify(usageRecorder, times(0)).recordMetrics(any(), any());
+        verify(usageRecorder, times(0)).recordMetrics(any(), any(), any());
     }
 
     // ──────────────────────────────────────────

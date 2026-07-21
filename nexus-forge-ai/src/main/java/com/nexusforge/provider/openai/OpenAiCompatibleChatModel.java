@@ -103,7 +103,19 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
         this.cfg.setEnabled(p.isEnabled());
         this.cfg.setApiKey(p.getApiKey());
         this.cfg.setBaseUrl(p.getBaseUrl() == null ? defaultBaseUrl : p.getBaseUrl());
-        this.cfg.setDefaultModel(p.getDefaultModel() == null ? defaultModel : p.getDefaultModel());
+        // default-model 三层优先级:yaml > 子类兜底 > null(允许)
+        // 但若 yaml 和子类兜底都拿不到 default-model,启动直接 fail-fast,
+        // 强制 "管理员必须先设置全局 model" 的语义;否则系统模式请求会发 model=null
+        // 到上游被 400 拒绝,运行时排错更费时。
+        String resolvedDefaultModel = p.getDefaultModel() != null ? p.getDefaultModel() : defaultModel;
+        if (resolvedDefaultModel == null || resolvedDefaultModel.isBlank()) {
+            throw new LlmException(ResultCode.LLM_CONFIG_MISSING,
+                    "vendor=" + vendor + " 缺少 default-model:请在 application.yaml 设 "
+                    + "spring.ai.providers." + vendor + ".default-model,"
+                    + "或调用 PUT /api/admin/ai/global-default 设置 ai_global_default 表(vendor="
+                    + vendor + " 仍需 yaml 注册兜底才能完成构造)");
+        }
+        this.cfg.setDefaultModel(resolvedDefaultModel);
         this.cfg.setSupportsStream(p.getSupportsStream());
         this.cfg.setSupportsTools(p.getSupportsTools());
 
@@ -148,6 +160,9 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
         long start = System.nanoTime();
         try {
             String url = cfg.getBaseUrl() + "/chat/completions";
+            // mapper.toOpenAi 内部会优先读 req.options["model"],fallback 到 providerDefaultModel;
+            // 这里传 cfg.getDefaultModel() 作 yaml 兜底,PreferenceResolver 的 model 经由
+            // LlmClient.call(req, vendor, model) 写入 req.options["model"]。
             OpenAiJsonMapper.OpenAiRequestBody body = mapper.toOpenAi(request, cfg.getDefaultModel());
             String payload = json.writeValueAsString(body);
             HttpRequest req = HttpRequest.newBuilder()
@@ -185,6 +200,7 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
     @Override
     public Flux<ChatChunk> stream(ChatRequest request) {
         String url = cfg.getBaseUrl() + "/chat/completions";
+        // 同 call():model 由 OpenAiJsonMapper 决定(优先 req.options["model"],fallback yaml default)
         OpenAiJsonMapper.OpenAiRequestBody body = mapper.toOpenAi(request, cfg.getDefaultModel());
         body.stream = true;
 

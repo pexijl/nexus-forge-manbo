@@ -2,6 +2,7 @@ package com.nexusforge.controller;
 
 import com.nexusforge.ai.ChatChunk;
 import com.nexusforge.ai.ChatRequest;
+import com.nexusforge.ai.service.PreferenceResolver;
 import com.nexusforge.client.LlmClient;
 import com.nexusforge.client.RateLimitGuard;
 import com.nexusforge.controller.dto.ChatRequestDto;
@@ -46,6 +47,8 @@ public class AiStreamController {
     private final ObjectMapper objectMapper;
     /** P5 Step 7:动态限流(userId + IP 维度) */
     private final RateLimitGuard rateLimitGuard;
+    /** P7:用户偏好解析器 */
+    private final PreferenceResolver preferenceResolver;
 
     @Operation(summary = "流式调用 LLM(P2,SSE)")
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -54,19 +57,28 @@ public class AiStreamController {
             @Valid @RequestBody ChatRequestDto dto,
             HttpServletResponse response,
             HttpServletRequest request) {
-        // P5 Step 7:限流(userId + IP)
-        rateLimitGuard.check(
-                principal == null ? null : principal.userId(),
-                request.getRemoteAddr());
+        Long userId = principal == null ? null : principal.userId();
+        // P7:解析偏好
+        PreferenceResolver.Resolved pref = preferenceResolver.resolve(userId, dto.getModel());
+        // P5 Step 7:限流(按 keySource 分流)
+        rateLimitGuard.check(userId, request.getRemoteAddr(), pref.source());
 
         // StreamingResponseBody 的 produces 不自动写 Content-Type;需手动设
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
         response.setCharacterEncoding("UTF-8");
 
         ChatRequest req = dto.toDomain(objectMapper);
-        log.info("[AI stream] user={} model={}",
-                principal == null ? "anon" : principal.userId(), req.getModel());
-        Flux<ChatChunk> chunks = client.stream(req);
+        log.info("[AI stream] user={} vendor={} model={} mode={}",
+                userId == null ? "anon" : userId, pref.vendor(), pref.model(), pref.source());
+        final Flux<ChatChunk> chunks;
+        if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
+            req.setModel(pref.vendor() + ":" + pref.model());
+            chunks = client.stream(req, preferenceResolver.resolveChatModel(pref));
+        } else {
+            // 系统 Key 路径:把 pref.vendor/pref.model 透传进 LlmClient.stream(req, vendor, model),
+            // 让 PreferenceResolver 解析的 model 成为唯一权威(不受 yaml 兜底影响)。
+            chunks = client.stream(req, pref.vendor(), pref.model());
+        }
         return output -> {
             log.info("[AI stream] writeTo called, output class={}", output.getClass().getName());
             writeChunks(output, chunks);

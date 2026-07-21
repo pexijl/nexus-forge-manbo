@@ -8,6 +8,7 @@ import com.nexusforge.exception.BusinessException;
 import com.nexusforge.repository.AiMessageUsageRepository;
 import com.nexusforge.user.UserQuotaOverride;
 import com.nexusforge.user.UserQuotaProvider;
+import com.nexusforge.ai.service.PreferenceResolver.KeySource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -53,10 +54,29 @@ public class QuotaService {
      * <p>P5 Step 8 扩展:在 LLM 调用之前,先用 {@code estimatedTokens}(用户输入粗估)
      * 做一次"若放行此请求,是否会超限"的预检。若已超限则直接拒绝,省去无意义的 LLM 调用。
      *
+     * <p>AI 个性化(P7)扩展:用户用私 Key 时({@link KeySource#USER_PRIVATE_KEY}),
+     * 平台配额不拦截(用户自付),仅放行。系统 Key 模式仍按 tier 校验。
+     *
      * @param userId          当前用户 ID
      * @param estimatedTokens 本次请求粗估 token 数(输入内容 / 2 + 16)
+     * @param keySource       三态 key 源,决定是否走平台配额
+     */
+    public void check(Long userId, long estimatedTokens, KeySource keySource) {
+        if (keySource == KeySource.USER_PRIVATE_KEY) {
+            log.debug("[Quota] 私 Key 模式,跳过平台配额检查: userId={}", userId);
+            return;
+        }
+        check(userId, estimatedTokens);
+    }
+
+    /**
+     * 兼容旧调用(默认 SYSTEM 模式)。新代码应显式传 {@link KeySource}。
      */
     public void check(Long userId, long estimatedTokens) {
+        checkInternal(userId, estimatedTokens);
+    }
+
+    private void checkInternal(Long userId, long estimatedTokens) {
         QuotaConfig quota = aiProperties.getQuota();
         if (!quota.isEnabled()) {
             log.debug("[Quota] 配额检查已关闭,放行 userId={}", userId);

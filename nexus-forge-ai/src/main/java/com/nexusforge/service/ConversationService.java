@@ -1,5 +1,6 @@
 package com.nexusforge.service;
 import com.nexusforge.ai.*;
+import com.nexusforge.ai.service.PreferenceResolver;
 import com.nexusforge.client.LlmClient;
 import com.nexusforge.client.UsageRecorder;
 import com.nexusforge.controller.dto.CreateConversationDto;
@@ -11,6 +12,7 @@ import com.nexusforge.entity.AiMessage;
 import com.nexusforge.entity.AiMessageUsage;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.BusinessException;
+import com.nexusforge.model.ChatModel;
 import com.nexusforge.repository.AiConversationRepository;
 import com.nexusforge.repository.AiMessageRepository;
 import com.nexusforge.repository.AiMessageUsageRepository;
@@ -35,6 +37,8 @@ public class ConversationService {
     private final ContextWindowBuilder contextBuilder;
     private final UsageRecorder usageRecorder;
     private final QuotaService quotaService;
+    /** P7:用户偏好解析器(决定 key source 与私 Key 路径) */
+    private final PreferenceResolver preferenceResolver;
     /**
      * P4 Step 11:把 {@link ChatResponse#getToolCalls()} 序列化为 JSON 写入
      * {@link AiMessage#getToolCalls()} 列。这里用 {@code tools.jackson} 包路径
@@ -69,9 +73,11 @@ public class ConversationService {
      * 在对话中发送用户消息并获取 AI 回复。
      * <ol>
      *   <li>校验对话归属</li>
+     *   <li>P7:解析偏好 → 决定 key source + 私 Key 路径</li>
+     *   <li>配额校验(系统 Key 才走;私 Key 跳过)</li>
      *   <li>持久化用户消息</li>
      *   <li>从 DB 加载历史消息,构建上下文窗口</li>
-     *   <li>调用 LlmClient.call()</li>
+     *   <li>按 key source 调 LlmClient</li>
      *   <li>持久化 AI 回复 + token 用量</li>
      * </ol>
      */
@@ -81,14 +87,16 @@ public class ConversationService {
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
 
-        // P5 Step 5/8:配额校验(24h 滑窗 token / 请求次数 + 粗估预检)。
-        // 超出抛 LLM_QUOTA_EXCEEDED → HTTP 429
-        quotaService.check(userId, estimateTokens(dto.getContent()));
-
         // 如果前端传了 model,覆盖对话模型(切换模型)
         if (dto.getModel() != null && !dto.getModel().isBlank()) {
             conv.setModel(dto.getModel());
         }
+
+        // P7:解析偏好(用对话当前 model 字段作为 hint)。这一步会读 user_ai_preference / ai_global_default。
+        PreferenceResolver.Resolved pref = preferenceResolver.resolve(userId, conv.getModel());
+
+        // P5 Step 5/8 + P7:配额校验(私 Key 模式直接放行)。
+        quotaService.check(userId, estimateTokens(dto.getContent()), pref.source());
 
         // 2. 持久化用户消息
         int nextSeq = messageRepo.findMaxSeq(conversationId) + 1;
@@ -103,19 +111,28 @@ public class ConversationService {
         List<AiMessage> history = messageRepo.findByConversationIdOrderBySeqAsc(conversationId);
         List<ChatMessage> context = contextBuilder.build(history, conv.getModel());
 
-        // 4. 调用 LLM
+        // 4. 调用 LLM(按 key source 走不同路径)
         ChatRequest request = ChatRequest.builder()
                 .model(conv.getModel())
                 .messages(context)
                 .build();
+        if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
+            // 把对话 model 强制设为 pref.vendor:pref.model,保证 LlmClient 私有路径走对的 ChatModel
+            request.setModel(pref.vendor() + ":" + pref.model());
+        }
 
         ChatResponse response;
         try {
-            response = llmClient.call(request);
+            if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
+                ChatModel privateModel = preferenceResolver.resolveChatModel(pref);
+                response = llmClient.call(request, privateModel);
+            } else {
+                response = llmClient.call(request);
+            }
         } catch (Exception e) {
-            log.error("[AI] LLM 调用失败: convId={}, model={}", conversationId, conv.getModel(), e);
+            log.error("[AI] LLM 调用失败: convId={}, model={}, mode={}", conversationId, conv.getModel(), pref.source(), e);
             // P5 Step 4: 失败路径也计数,告警面板能统计失败率(否则失败请求从 metrics 中消失)
-            usageRecorder.recordRequest(conv.getModel());
+            usageRecorder.recordRequest(conv.getModel(), pref.source());
             throw e;
         }
 
@@ -152,10 +169,10 @@ public class ConversationService {
             usageRepo.save(usage);
 
             // P5 Step 4: 把本次 LLM 调用的 token 消耗上报为 Micrometer counter
-            usageRecorder.recordMetrics(response.getUsage(), response.getModel());
+            usageRecorder.recordMetrics(response.getUsage(), response.getModel(), pref.source());
         } else {
             // P5 Step 8: LLM 未返回 usage 时,仍计一次请求(告警面板能统计到)
-            usageRecorder.recordRequest(conv.getModel());
+            usageRecorder.recordRequest(conv.getModel(), pref.source());
         }
 
         // 7. 自动更新标题(取第一条 USER 消息前 30 字)

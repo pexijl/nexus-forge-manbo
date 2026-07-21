@@ -7,6 +7,7 @@ import com.nexusforge.config.AiProperties;
 import com.nexusforge.error.StreamTimeoutException;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
+import com.nexusforge.model.ChatModel;
 import com.nexusforge.router.ChatModelRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,8 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -119,6 +122,120 @@ public class LlmClient {
     }
 
     /**
+     * P7 个性化路径:用户私 Key 模式调用。
+     *
+     * <p>与 {@link #call(ChatRequest)} 区别:
+     * <ul>
+     *   <li>不走降级链(用户的 Key 失败就该报给他,不应悄悄切到别人的 Key)</li>
+     *   <li>不参与熔断计数(熔断是平台级 SLO,不应被单用户的私 Key 故障污染)</li>
+     *   <li>错误归一化(超时 / 网络错 → {@link ResultCode#LLM_UPSTREAM_TIMEOUT / LLM_PROVIDER_ERROR})保持一致</li>
+     * </ul>
+     */
+    public ChatResponse call(ChatRequest request, ChatModel privateKeyModel) {
+        long t = System.currentTimeMillis();
+        ChatResponse resp;
+        try {
+            resp = privateKeyModel.call(withModel(request, /* modelName */ privateKeyDefaultModel(privateKeyModel)));
+        } catch (LlmException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LlmException(ResultCode.LLM_PROVIDER_ERROR, "私 Key 调用失败: " + e.getMessage());
+        }
+        log.info("[LLM private] vendor={} model={} latency={}ms tokens={}/{}",
+                privateKeyModel.name(),
+                resp.getModel(),
+                System.currentTimeMillis() - t,
+                resp.getUsage() == null ? 0 : resp.getUsage().getPromptTokens(),
+                resp.getUsage() == null ? 0 : resp.getUsage().getCompletionTokens());
+        return resp;
+    }
+
+    /**
+     * P7 系统 Key 路径:由 PreferenceResolver 解析出 vendor/model 后透传。
+     *
+     * <p>与 {@link #call(ChatRequest)} 区别:
+     * <ul>
+     *   <li>绕开 {@link ChatModelRouter} 的 yaml-default 兜底(那是 vendor 级 fallback,
+     *       不是请求级偏好),让 ai_global_default.model 或 user_ai_preference.model
+     *       成为唯一权威。</li>
+     *   <li>仍然走降级链(系统 Key 失败时,允许切到下一个 vendor)。</li>
+     *   <li>不接私 Key —— 私 Key 路径请用 {@link #call(ChatRequest, ChatModel)}。</li>
+     * </ul>
+     *
+     * @param request    原始 ChatRequest(model 字段会被本方法覆盖成 {@code model})
+     * @param vendor     resolved.vendor,如 "qwen"
+     * @param model      resolved.model,如 "qwen-turbo";非空时优先于 yaml default
+     */
+    public ChatResponse call(ChatRequest request, String vendor, String model) {
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(
+                withModel(request, vendor + ":" + (model == null ? "" : model)));
+        LlmException lastError = null;
+        for (ChatModelRouter.Resolved r : chain) {
+            if (chain.primaryVendor().equals(r.vendor()) && router.isPrimaryVendorOpen(r)) {
+                log.warn("[LLM fallback] 首选 vendor={} 已熔断,跳下一跳", r.vendor());
+                continue;
+            }
+            try {
+                long t = System.currentTimeMillis();
+                // buildPrefRequest:把 model 写进 req.options["model"] 让 mapper 优先读;
+                // 同时保留 req.model(给 router 路由用)。model == null 时不让它进 options,
+                // 让 mapper fallback 到 yaml default(此时 PreferenceResolver 不应返回 null)
+                ChatResponse resp = r.model().call(buildPrefRequest(request, model));
+                log.info("[LLM pref] vendor={} model={} latency={}ms tokens={}/{}",
+                        r.vendor(), model,
+                        System.currentTimeMillis() - t,
+                        resp.getUsage() == null ? 0 : resp.getUsage().getPromptTokens(),
+                        resp.getUsage() == null ? 0 : resp.getUsage().getCompletionTokens());
+                if (!r.vendor().equals(chain.primaryVendor())) {
+                    log.info("[LLM fallback] 已降级到 vendor={} model={}", r.vendor(), model);
+                }
+                return resp;
+            } catch (LlmException ex) {
+                lastError = ex;
+                if (!ChatModelRouter.isFallbackTriggering(ex, r.vendor())) {
+                    throw ex;
+                }
+                log.warn("[LLM fallback] vendor={} 失败 code={} detail={},尝试下一跳",
+                        r.vendor(), ex.getCode(), ex.getMessage());
+            }
+        }
+        LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
+                "降级链已耗尽,primary=" + chain.primaryVendor());
+        if (lastError != null) ex.initCause(lastError);
+        throw ex;
+    }
+
+    /**
+     * 构造 P7 系统 Key 路径下的 ChatRequest 副本:把 {@code model} 塞进 {@code options["model"]},
+     * 让 {@code OpenAiJsonMapper.toOpenAi} 在解析时优先用这个值(yaml 兜底之后)。
+     * 其它字段(messages / temperature / maxTokens / stream / tools)与 src 一致。
+     */
+    private ChatRequest buildPrefRequest(ChatRequest src, String model) {
+        Map<String, Object> opts = src.getOptions() == null
+                ? new HashMap<>()
+                : new HashMap<>(src.getOptions());
+        if (model != null && !model.isBlank()) {
+            opts.put("model", model);
+        }
+        return ChatRequest.builder()
+                .model(src.getModel())
+                .messages(src.getMessages())
+                .temperature(src.getTemperature())
+                .maxTokens(src.getMaxTokens())
+                .stream(src.getStream())
+                .options(opts)
+                .tools(src.getTools())
+                .build();
+    }
+
+    /** 从 ChatModel 名字推 modelName(避免 ChatRequest 重复声明) */
+    private static String privateKeyDefaultModel(ChatModel m) {
+        // ChatModel SPI 的 vendor 名已知;具体 model 由 ChatRequest 自身的 model 字段决定
+        // (ChatModel.call 内部会用 cfg.defaultModel 兜底)。这里返回 null 表示"沿用 request.model"。
+        return null;
+    }
+
+    /**
      * 流式调用门面。
      *
      * <p>P2 增强:
@@ -178,6 +295,83 @@ public class LlmClient {
                 // P4 Step 11:在出口聚合 delta.tool_calls 增量 → 终止帧的 toolCalls 列表。
                 // 放在 doFinally 之后,这样 use 量统计仍然反映 provider 真实帧数;
                 // 放在 onErrorMap 之前,这样上游 Flux.error 透传(无终止帧时不补帧)。
+                .transform(functionCallAggregator::aggregate)
+                .onErrorMap(err -> mapStreamError(err, timeout));
+    }
+
+    /**
+     * P7 个性化路径:用户私 Key 模式流式调用。
+     *
+     * <p>不走降级链、不参与熔断计数;保留 timeout + 用量累加日志。
+     */
+    public Flux<ChatChunk> stream(ChatRequest request, ChatModel privateKeyModel) {
+        Duration timeout = props.getRequestTimeout();
+        ChatRequest req = withModel(request, null);
+        req.setStream(Boolean.TRUE);
+
+        AtomicLong promptTokens = new AtomicLong();
+        AtomicLong completionTokens = new AtomicLong();
+
+        return privateKeyModel.stream(req)
+                .timeout(timeout)
+                .doOnNext(chunk -> {
+                    if (chunk.getUsage() != null) {
+                        promptTokens.addAndGet(chunk.getUsage().getPromptTokens() == null
+                                ? 0L : chunk.getUsage().getPromptTokens());
+                        completionTokens.addAndGet(chunk.getUsage().getCompletionTokens() == null
+                                ? 0L : chunk.getUsage().getCompletionTokens());
+                    }
+                })
+                .doFinally(sig -> log.info(
+                        "[LLM stream private] vendor={} model={} signal={} tokens={}/{}",
+                        privateKeyModel.name(), req.getModel(), sig,
+                        promptTokens.get(), completionTokens.get()))
+                .transform(functionCallAggregator::aggregate)
+                .onErrorMap(err -> mapStreamError(err, timeout));
+    }
+
+    /**
+     * P7 系统 Key 路径流式:由 PreferenceResolver 解析 vendor/model。
+     *
+     * <p>走降级链(系统 Key 失败时切下一个 vendor),但 model 用 PreferenceResolver
+     * 透传的 {@code model}(来自 ai_global_default 或 user_ai_preference),不会被
+     * yaml 的 default-model 覆盖。
+     */
+    public Flux<ChatChunk> stream(ChatRequest request, String vendor, String model) {
+        Duration timeout = props.getRequestTimeout();
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(
+                withModel(request, vendor + ":" + (model == null ? "" : model)));
+
+        ChatModelRouter.Resolved resolved = pickFirstUsableHop(chain);
+        if (resolved == null) {
+            LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
+                    "降级链全部熔断或未配置");
+            return Flux.error(ex);
+        }
+        if (!resolved.vendor().equals(chain.primaryVendor())) {
+            log.info("[LLM stream fallback] 已降级到 vendor={} model={}",
+                    resolved.vendor(), model);
+        }
+        ChatRequest req = buildPrefRequest(request, model);
+        req.setStream(Boolean.TRUE);
+
+        AtomicLong promptTokens = new AtomicLong();
+        AtomicLong completionTokens = new AtomicLong();
+
+        return resolved.model().stream(req)
+                .timeout(timeout)
+                .doOnNext(chunk -> {
+                    if (chunk.getUsage() != null) {
+                        promptTokens.addAndGet(chunk.getUsage().getPromptTokens() == null
+                                ? 0L : chunk.getUsage().getPromptTokens());
+                        completionTokens.addAndGet(chunk.getUsage().getCompletionTokens() == null
+                                ? 0L : chunk.getUsage().getCompletionTokens());
+                    }
+                })
+                .doFinally(sig -> log.info(
+                        "[LLM stream pref] vendor={} model={} signal={} tokens={}/{}",
+                        resolved.vendor(), model, sig,
+                        promptTokens.get(), completionTokens.get()))
                 .transform(functionCallAggregator::aggregate)
                 .onErrorMap(err -> mapStreamError(err, timeout));
     }

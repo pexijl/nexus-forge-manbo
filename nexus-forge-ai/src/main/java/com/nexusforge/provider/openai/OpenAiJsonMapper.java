@@ -44,7 +44,18 @@ public class OpenAiJsonMapper {
 
     public OpenAiRequestBody toOpenAi(ChatRequest req, String providerDefaultModel) {
         OpenAiRequestBody body = new OpenAiRequestBody();
-        body.model = providerDefaultModel;
+        // 三层 model 优先级:
+        //   1) req.options["model"]  ← P7 PreferenceResolver 透传(PrefResolver.resolved.model()),
+        //                                让 ai_global_default / user_ai_preference 真正成为权威;
+        //   2) providerDefaultModel  ← yaml 的 spring.ai.providers.<vendor>.default-model;
+        //                                兜底,确保 vendor 注册期就有 model 可用
+        //   3) req.model             ← 不参与(那是 ChatModelRouter 路由的 channel,可能带 vendor 前缀,
+        //                                不该影响上游请求体 model 名;OpenAiCompatibleChatModel.call
+        //                                内部也不读它)
+        // 关键设计:mapper 不读 req.model,避免 ChatRequest.model 字段"业务可以传 vendor:model"
+        // 的语义与"上游请求体 model"语义混淆。
+        Object optModel = req.getOptions() == null ? null : req.getOptions().get("model");
+        body.model = (optModel instanceof String s && !s.isBlank()) ? s : providerDefaultModel;
         body.stream = Boolean.TRUE.equals(req.getStream());
         body.temperature = req.getTemperature();
         body.max_tokens = req.getMaxTokens();

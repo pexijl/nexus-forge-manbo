@@ -33,9 +33,13 @@ public class QwenChatModel extends OpenAiCompatibleChatModel {
 
     public QwenChatModel(AiProperties props, ObjectMapper json, OpenAiJsonMapper mapper,
                          OpenAiStreamParser streamParser) {
+        // 不传 defaultModel:管理员必须在启动后通过 PUT /api/admin/ai/global-default
+        // 显式设置 ai_global_default.vendor/model,否则任何 system 模式调用都会因
+        // model 为 null 在 mapper toOpenAi() 时被 PG 上游拒绝(400)。
+        // yaml / 应用启动校验(下一步)会让 vendor 注册阶段就 fail-fast。
         super("qwen",
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "qwen-turbo",
+                /* defaultModel */ null,
                 props, json, mapper, streamParser);
     }
 }
