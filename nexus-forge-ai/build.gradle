@@ -39,6 +39,9 @@ dependencies {
     testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:postgresql'
+    // P5 Step 2: 显式跑 JSR-303 校验(boot 4.1 ApplicationContextRunner
+    // 不装配 MethodValidationPostProcessor,直接用 jakarta.validation API)
+    testImplementation 'org.springframework.boot:spring-boot-starter-validation'
 }
 
 test { useJUnitPlatform() }

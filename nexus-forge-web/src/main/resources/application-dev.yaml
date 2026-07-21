@@ -23,6 +23,30 @@ spring:
         format_sql: false # 格式化SQL语句，方便阅读
     show-sql: true # 显示SQL语句，方便调试
     open-in-view: false # 关闭Open Session in View，避免性能问题和潜在的内存泄漏
+  ai:
+    enabled: ${SPRING_AI_ENABLED:true}
+    default-vendor: ${SPRING_AI_DEFAULT_VENDOR:openai}
+    default-model: ${SPRING_AI_DEFAULT_MODEL:gpt-4o-mini}
+    # P5 — Token 用量配额(24h 滑窗,长期防刷)
+    quota:
+      enabled: ${SPRING_AI_QUOTA_ENABLED:true}
+      default-user-tier: USER
+      tiers:
+        USER:
+          # dev 默认配额:1M token/天 + 5000 次/天;prod 通过 .env 覆盖
+          daily-token-limit: 1000000
+          request-limit: 5000
+        ADMIN:
+          # dev:管理员不限,生产可改
+          daily-token-limit: null
+          request-limit: null
+    # P5 — 限流(Caffeine 本地令牌桶,秒级防突发)
+    rate-limit:
+      enabled: ${SPRING_AI_RATE_LIMIT_ENABLED:true}
+      user-qps: 1.0
+      user-burst: 5
+      ip-qps: 5.0
+      ip-burst: 20
 
 
 jwt:
