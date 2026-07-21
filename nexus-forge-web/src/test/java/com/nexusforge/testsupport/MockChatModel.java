@@ -140,11 +140,18 @@ public class MockChatModel {
                         .build();
             }
             String echoed = echoOf(request.getMessages());
+            int promptLen = request.getMessages().stream()
+                    .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0).sum();
             return ChatResponse.builder()
                     .id("mock-" + vendorName + "-" + System.nanoTime())
                     .model("mock-" + vendorName + "-model")
                     .content(echoed)
                     .finishReason("stop")
+                    .usage(ChatUsage.builder()
+                            .promptTokens(promptLen / 4 + 1)
+                            .completionTokens(echoed.length() / 4 + 1)
+                            .totalTokens(promptLen / 4 + echoed.length() / 4 + 2)
+                            .build())
                     .latencyMillis(1L)
                     .build();
         }
