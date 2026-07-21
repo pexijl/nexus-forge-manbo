@@ -1,0 +1,123 @@
+package com.nexusforge.service;
+
+import com.nexusforge.config.AiProperties;
+import com.nexusforge.config.AiProperties.QuotaConfig;
+import com.nexusforge.config.AiProperties.QuotaTier;
+import com.nexusforge.enums.ResultCode;
+import com.nexusforge.exception.BusinessException;
+import com.nexusforge.repository.AiMessageUsageRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import java.time.OffsetDateTime;
+
+/**
+ * P5 Step 5 — 用量配额校验服务。
+ *
+ * <p>职责:在 {@link ConversationService#sendMessage} 调用 LLM 之前,检查该用户
+ * 24h 累计 token / 请求次数是否超出配额。超出则抛
+ * {@link BusinessException#BusinessException(ResultCode, String)}
+ * ({@link ResultCode#LLM_QUOTA_EXCEEDED}),GlobalExceptionHandler 映射为 HTTP 429。
+ *
+ * <p>角色读取策略:从 {@link SecurityContextHolder} 拿当前 Authentication 的
+ * {@link GrantedAuthority}(由 {@code JwtAuthenticationFilter} 在鉴权时写入),
+ * 在 {@link QuotaConfig#getTiers()} 中匹配;若无匹配则落到
+ * {@link QuotaConfig#getDefaultUserTier()}。
+ *
+ * <p>配额开关:{@link QuotaConfig#isEnabled()} 为 false 时,check 直接放行,
+ * 仅记录用量不做拦截(适合开发/测试环境)。
+ *
+ * <p>与 {@link com.nexusforge.client.UsageRecorder} 的区别:
+ * QuotaService 是请求前拦截(阻止),UsageRecorder 是请求后计量(记录)。
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class QuotaService {
+
+    private final AiMessageUsageRepository usageRepo;
+    private final AiProperties aiProperties;
+
+    /**
+     * 校验 userId 的 24h 配额。超出则抛 {@link BusinessException}。
+     *
+     * <p>检查维度:
+     * <ol>
+     *   <li>{@code dailyTokenLimit} — 24h 内累计 totalTokens 超限</li>
+     *   <li>{@code requestLimit} — 24h 内累计请求次数超限</li>
+     * </ol>
+     * 两者独立校验,任一超限即拒绝。limit 为 null 表示该维度不限。
+     *
+     * @param userId 当前用户 ID
+     */
+    public void check(Long userId) {
+        QuotaConfig quota = aiProperties.getQuota();
+        if (!quota.isEnabled()) {
+            log.debug("[Quota] 配额检查已关闭,放行 userId={}", userId);
+            return;
+        }
+
+        QuotaTier tier = resolveTier(quota);
+        if (tier.getDailyTokenLimit() == null && tier.getRequestLimit() == null) {
+            // 该角色完全不限,直接放行(避免无意义的 DB 查询)
+            log.debug("[Quota] 角色 tier 不限,放行 userId={}", userId);
+            return;
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime from = now.minusHours(24);
+        UsageAggregateRow agg = usageRepo.sumByUserAndWindow(userId, from, now);
+
+        // 检查 token 上限
+        if (tier.getDailyTokenLimit() != null && agg.totalTokens() > tier.getDailyTokenLimit()) {
+            log.warn("[Quota] token 超限: userId={}, used={}, limit={}",
+                    userId, agg.totalTokens(), tier.getDailyTokenLimit());
+            throw new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED,
+                    "24h token 配额已用尽(已用 %d,上限 %d)".formatted(agg.totalTokens(), tier.getDailyTokenLimit()));
+        }
+
+        // 检查请求次数上限
+        if (tier.getRequestLimit() != null && agg.requestCount() > tier.getRequestLimit()) {
+            log.warn("[Quota] 请求次数超限: userId={}, used={}, limit={}",
+                    userId, agg.requestCount(), tier.getRequestLimit());
+            throw new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED,
+                    "24h 请求次数配额已用尽(已用 %d,上限 %d)".formatted(agg.requestCount(), tier.getRequestLimit()));
+        }
+
+        log.debug("[Quota] 校验通过: userId={}, tokens={}/{}, requests={}/{}",
+                userId, agg.totalTokens(), tier.getDailyTokenLimit(),
+                agg.requestCount(), tier.getRequestLimit());
+    }
+
+    /**
+     * 从 SecurityContextHolder 读取当前用户的第一个角色,
+     * 在 tiers 中查找;找不到则落到 defaultUserTier。
+     */
+    private QuotaTier resolveTier(QuotaConfig quota) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null) {
+            for (GrantedAuthority ga : auth.getAuthorities()) {
+                String role = ga.getAuthority().toUpperCase();
+                QuotaTier tier = quota.getTiers().get(role);
+                if (tier != null) {
+                    return tier;
+                }
+            }
+        }
+        // fallback
+        QuotaTier fallback = quota.getTiers().get(quota.getDefaultUserTier().toUpperCase());
+        if (fallback == null) {
+            log.warn("[Quota] defaultUserTier '{}' 未在 tiers 中配置,放行", quota.getDefaultUserTier());
+            // 返回一个不限的 tier,避免 NPE
+            QuotaTier open = new QuotaTier();
+            open.setDailyTokenLimit(null);
+            open.setRequestLimit(null);
+            return open;
+        }
+        return fallback;
+    }
+}

@@ -34,6 +34,7 @@ public class ConversationService {
     private final LlmClient llmClient;
     private final ContextWindowBuilder contextBuilder;
     private final UsageRecorder usageRecorder;
+    private final QuotaService quotaService;
     /**
      * P4 Step 11:把 {@link ChatResponse#getToolCalls()} 序列化为 JSON 写入
      * {@link AiMessage#getToolCalls()} 列。这里用 {@code tools.jackson} 包路径
@@ -79,6 +80,9 @@ public class ConversationService {
         // 1. 校验对话归属
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
+
+        // P5 Step 5:配额校验(24h 滑窗 token / 请求次数)。超出抛 LLM_QUOTA_EXCEEDED → HTTP 429
+        quotaService.check(userId);
 
         // 如果前端传了 model,覆盖对话模型(切换模型)
         if (dto.getModel() != null && !dto.getModel().isBlank()) {
