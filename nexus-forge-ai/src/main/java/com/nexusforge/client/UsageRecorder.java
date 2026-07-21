@@ -53,6 +53,7 @@ public class UsageRecorder {
      * 完整 ctor。Spring 容器走这条路径,Boot 4.1 在启用了 starter-actuator 后会自动
      * 注入 {@code SimpleMeterRegistry} / PrometheusMeterRegistry 等实现。
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public UsageRecorder(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }
