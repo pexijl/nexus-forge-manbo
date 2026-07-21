@@ -27,6 +27,11 @@ dependencies {
     // BOM 不被管理,由根 build.gradle 的 dependencyManagement 统一定义 reactorNettyVersion = '1.2.6')
     implementation 'org.springframework:spring-webflux'
     implementation 'io.projectreactor.netty:reactor-netty-core'
+    // P5 Step 4: UsageRecorder 上报 Micrometer 指标,ai.chat.requests / tokens.* 四个 counter
+    // 由 ConversationService 在 P3 已落的 usageRepo.save 之后调用 recordMetrics 触发。
+    // nexus-forge-ai 是 library,不依赖 actuator;但需要 io.micrometer:micrometer-core 中的
+    // MeterRegistry 接口(observation/commons 不含)。
+    implementation 'io.micrometer:micrometer-core'
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.junit.jupiter:junit-jupiter-params'
     testImplementation 'com.squareup.okhttp3:mockwebserver3-junit5:5.4.0'

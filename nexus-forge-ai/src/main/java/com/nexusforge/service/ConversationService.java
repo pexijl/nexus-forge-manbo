@@ -1,7 +1,7 @@
 package com.nexusforge.service;
-
 import com.nexusforge.ai.*;
 import com.nexusforge.client.LlmClient;
+import com.nexusforge.client.UsageRecorder;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
 import com.nexusforge.controller.dto.UpdateTitleDto;
@@ -33,6 +33,7 @@ public class ConversationService {
     private final AiMessageUsageRepository usageRepo;
     private final LlmClient llmClient;
     private final ContextWindowBuilder contextBuilder;
+    private final UsageRecorder usageRecorder;
     /**
      * P4 Step 11:把 {@link ChatResponse#getToolCalls()} 序列化为 JSON 写入
      * {@link AiMessage#getToolCalls()} 列。这里用 {@code tools.jackson} 包路径
@@ -108,6 +109,8 @@ public class ConversationService {
             response = llmClient.call(request);
         } catch (Exception e) {
             log.error("[AI] LLM 调用失败: convId={}, model={}", conversationId, conv.getModel(), e);
+            // P5 Step 4: 失败路径也计数,告警面板能统计失败率(否则失败请求从 metrics 中消失)
+            usageRecorder.recordRequest(conv.getModel());
             throw e;
         }
 
@@ -142,6 +145,11 @@ public class ConversationService {
             usage.setTotalTokens(response.getUsage().getTotalTokens());
             usage.setModel(response.getModel());
             usageRepo.save(usage);
+
+            // P5 Step 4: 把本次 LLM 调用的 token 消耗上报为 Micrometer counter
+            // (ai.chat.requests / tokens.{prompt,completion,total})。埋点失败
+            // 不影响主链路,UsageRecorder 内部吞异常。
+            usageRecorder.recordMetrics(response.getUsage(), response.getModel());
         }
 
         // 7. 自动更新标题(取第一条 USER 消息前 30 字)
