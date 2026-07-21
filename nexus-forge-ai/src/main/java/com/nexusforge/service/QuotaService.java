@@ -48,18 +48,15 @@ public class QuotaService {
     private final UserQuotaProvider userQuotaProvider;
 
     /**
-     * 校验 userId 的 24h 配额。超出则抛 {@link BusinessException}。
+     * 校验 userId 的 24h 配额(含粗估 token 预检)。
      *
-     * <p>检查维度:
-     * <ol>
-     *   <li>{@code dailyTokenLimit} — 24h 内累计 totalTokens 超限</li>
-     *   <li>{@code requestLimit} — 24h 内累计请求次数超限</li>
-     * </ol>
-     * 两者独立校验,任一超限即拒绝。limit 为 null 表示该维度不限。
+     * <p>P5 Step 8 扩展:在 LLM 调用之前,先用 {@code estimatedTokens}(用户输入粗估)
+     * 做一次"若放行此请求,是否会超限"的预检。若已超限则直接拒绝,省去无意义的 LLM 调用。
      *
-     * @param userId 当前用户 ID
+     * @param userId          当前用户 ID
+     * @param estimatedTokens 本次请求粗估 token 数(输入内容 / 2 + 16)
      */
-    public void check(Long userId) {
+    public void check(Long userId, long estimatedTokens) {
         QuotaConfig quota = aiProperties.getQuota();
         if (!quota.isEnabled()) {
             log.debug("[Quota] 配额检查已关闭,放行 userId={}", userId);
@@ -68,7 +65,6 @@ public class QuotaService {
 
         QuotaTier tier = resolveTier(quota, userId);
         if (tier.getDailyTokenLimit() == null && tier.getRequestLimit() == null) {
-            // 该角色完全不限,直接放行(避免无意义的 DB 查询)
             log.debug("[Quota] tier 不限,放行 userId={}", userId);
             return;
         }
@@ -77,24 +73,27 @@ public class QuotaService {
         OffsetDateTime from = now.minusHours(24);
         UsageAggregateRow agg = usageRepo.sumByUserAndWindow(userId, from, now);
 
-        // 检查 token 上限
-        if (tier.getDailyTokenLimit() != null && agg.totalTokens() > tier.getDailyTokenLimit()) {
-            log.warn("[Quota] token 超限: userId={}, used={}, limit={}",
-                    userId, agg.totalTokens(), tier.getDailyTokenLimit());
+        // P5 Step 8:粗估预检——若当前累计 + 粗估已超限,提前拒绝
+        if (tier.getDailyTokenLimit() != null
+                && agg.totalTokens() + estimatedTokens > tier.getDailyTokenLimit()) {
+            log.warn("[Quota] token 预检超限: userId={}, used={}, estimated={}, limit={}",
+                    userId, agg.totalTokens(), estimatedTokens, tier.getDailyTokenLimit());
             throw new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED,
-                    "24h token 配额已用尽(已用 %d,上限 %d)".formatted(agg.totalTokens(), tier.getDailyTokenLimit()));
+                    "24h token 配额即将用尽(已用 %d,预估需 %d,上限 %d)"
+                            .formatted(agg.totalTokens(), estimatedTokens, tier.getDailyTokenLimit()));
         }
 
-        // 检查请求次数上限
-        if (tier.getRequestLimit() != null && agg.requestCount() > tier.getRequestLimit()) {
+        // 请求次数上限(无需预估,每次 +1)
+        if (tier.getRequestLimit() != null && agg.requestCount() >= tier.getRequestLimit()) {
             log.warn("[Quota] 请求次数超限: userId={}, used={}, limit={}",
                     userId, agg.requestCount(), tier.getRequestLimit());
             throw new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED,
-                    "24h 请求次数配额已用尽(已用 %d,上限 %d)".formatted(agg.requestCount(), tier.getRequestLimit()));
+                    "24h 请求次数配额已用尽(已用 %d,上限 %d)"
+                            .formatted(agg.requestCount(), tier.getRequestLimit()));
         }
 
-        log.debug("[Quota] 校验通过: userId={}, tokens={}/{}, requests={}/{}",
-                userId, agg.totalTokens(), tier.getDailyTokenLimit(),
+        log.debug("[Quota] 校验通过: userId={}, tokens={}/{}(+est {}), requests={}/{}",
+                userId, agg.totalTokens(), tier.getDailyTokenLimit(), estimatedTokens,
                 agg.requestCount(), tier.getRequestLimit());
     }
 

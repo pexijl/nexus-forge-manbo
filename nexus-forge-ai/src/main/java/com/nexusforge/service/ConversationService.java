@@ -81,8 +81,9 @@ public class ConversationService {
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
 
-        // P5 Step 5:配额校验(24h 滑窗 token / 请求次数)。超出抛 LLM_QUOTA_EXCEEDED → HTTP 429
-        quotaService.check(userId);
+        // P5 Step 5/8:配额校验(24h 滑窗 token / 请求次数 + 粗估预检)。
+        // 超出抛 LLM_QUOTA_EXCEEDED → HTTP 429
+        quotaService.check(userId, estimateTokens(dto.getContent()));
 
         // 如果前端传了 model,覆盖对话模型(切换模型)
         if (dto.getModel() != null && !dto.getModel().isBlank()) {
@@ -151,9 +152,10 @@ public class ConversationService {
             usageRepo.save(usage);
 
             // P5 Step 4: 把本次 LLM 调用的 token 消耗上报为 Micrometer counter
-            // (ai.chat.requests / tokens.{prompt,completion,total})。埋点失败
-            // 不影响主链路,UsageRecorder 内部吞异常。
             usageRecorder.recordMetrics(response.getUsage(), response.getModel());
+        } else {
+            // P5 Step 8: LLM 未返回 usage 时,仍计一次请求(告警面板能统计到)
+            usageRecorder.recordRequest(conv.getModel());
         }
 
         // 7. 自动更新标题(取第一条 USER 消息前 30 字)
@@ -320,5 +322,16 @@ public class ConversationService {
             vo.setUsage(uv);
         }
         return vo;
+    }
+
+    /**
+     * P5 Step 8:粗估输入 token 数,用于配额预检(在 LLM 调用之前判断是否可能超限)。
+     *
+     * <p>经验值:中文 1 字 ≈ 1.5 token,英文 1 词 ≈ 1.3 token。
+     * 简化为 {@code 字符数 / 2 + 16}(16 为 system message 固定开销)。
+     */
+    private long estimateTokens(String text) {
+        if (text == null || text.isEmpty()) return 16;
+        return text.length() / 2 + 16;
     }
 }

@@ -88,7 +88,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(500, 600, 1100, 10));
 
-            assertThatThrownBy(() -> service.check(USER_ID))
+            assertThatThrownBy(() -> service.check(USER_ID, 0))
                     .isInstanceOf(BusinessException.class)
                     .satisfies(ex -> {
                         BusinessException bex = (BusinessException) ex;
@@ -108,7 +108,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(100, 200, 300, 10));
 
-            assertThatThrownBy(() -> service.check(USER_ID))
+            assertThatThrownBy(() -> service.check(USER_ID, 0))
                     .isInstanceOf(BusinessException.class)
                     .satisfies(ex -> {
                         BusinessException bex = (BusinessException) ex;
@@ -137,7 +137,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(500, 300, 800, 10));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 不抛即通过
         }
 
@@ -146,7 +146,7 @@ class QuotaServiceTest {
         void disabled_quota_passes() {
             props.getQuota().setEnabled(false);
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 不抛,不查 DB
         }
 
@@ -164,7 +164,7 @@ class QuotaServiceTest {
             adminTier.setRequestLimit(null);
             props.getQuota().setTiers(Map.of("ADMIN", adminTier));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 不抛,不查 DB(dailyTokenLimit == null && requestLimit == null 快速放行)
         }
 
@@ -180,7 +180,7 @@ class QuotaServiceTest {
                     .thenReturn(new UsageAggregateRow(0, 0, 999_999, 10));
 
             // token=999_999 超过任何合理 limit,但 dailyTokenLimit=null → 跳过
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
         }
 
         @Test
@@ -196,7 +196,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(0, 0, 0, 0));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // USER 角色 → 走 defaultUserTier=ADMIN → 不限 → 放行
         }
 
@@ -209,7 +209,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(0, 0, 0, 0));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 不抛(NPE 防御)
         }
     }
@@ -238,7 +238,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(0, 0, 500, 5));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 走用户覆盖(1000/10),不走角色不限 tier。用量在限额内 → 放行
         }
 
@@ -251,7 +251,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(0, 0, 1500, 5));
 
-            assertThatThrownBy(() -> service.check(USER_ID))
+            assertThatThrownBy(() -> service.check(USER_ID, 0))
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
         }
@@ -265,7 +265,7 @@ class QuotaServiceTest {
             when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
                     .thenReturn(new UsageAggregateRow(0, 0, 500, 15));
 
-            assertThatThrownBy(() -> service.check(USER_ID))
+            assertThatThrownBy(() -> service.check(USER_ID, 0))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getCode())
                     .isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
@@ -278,8 +278,69 @@ class QuotaServiceTest {
                     .thenReturn(java.util.Optional.of(
                             new com.nexusforge.user.UserQuotaOverride(null, null)));
 
-            service.check(USER_ID);
+            service.check(USER_ID, 0);
             // 不抛,不查 DB
+        }
+
+        // ──────────────────────────────────────────────
+        // 粗估 token 预检(P5 Step 8)
+        // ──────────────────────────────────────────────
+
+        @Test
+        @DisplayName("粗估 token 导致预检超限 → 抛 LLM_QUOTA_EXCEEDED(即使累计未超)")
+        void estimated_token_triggers_precheck() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(1000L);
+            tier.setRequestLimit(5000L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            // 当前累计 900 token,limit=1000。传 estimatedTokens=200 → 900+200>1000
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 900, 1));
+
+            assertThatThrownBy(() -> service.check(USER_ID, 200))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(ex -> {
+                        BusinessException bex = (BusinessException) ex;
+                        assertThat(bex.getCode()).isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+                        assertThat(bex.getMessage()).contains("token");
+                    });
+        }
+
+        @Test
+        @DisplayName("粗估 token 在限额内 → 放行")
+        void estimated_token_within_limit_passes() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(1000L);
+            tier.setRequestLimit(5000L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            // 当前累计 500,limit=1000。传 estimatedTokens=200 → 500+200=700<1000
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 500, 1));
+
+            service.check(USER_ID, 200);
+            // 不抛即通过
+        }
+
+        @Test
+        @DisplayName("请求次数恰好等于 limit → 超限(>=)")
+        void request_count_at_limit_throws() {
+            QuotaTier tier = new QuotaTier();
+            tier.setDailyTokenLimit(null);
+            tier.setRequestLimit(10L);
+            props.getQuota().setTiers(Map.of("USER", tier));
+
+            // 恰好 10 次,limit=10 → >= 触发超限
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 0, 10));
+
+            assertThatThrownBy(() -> service.check(USER_ID, 0))
+                    .isInstanceOf(BusinessException.class)
+                    .satisfies(ex -> {
+                        assertThat(((BusinessException) ex).getCode())
+                                .isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+                    });
         }
     }
 }

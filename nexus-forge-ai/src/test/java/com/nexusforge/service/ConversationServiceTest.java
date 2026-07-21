@@ -36,6 +36,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
@@ -430,6 +431,63 @@ class ConversationServiceTest {
 
         assertThatThrownBy(() -> service.deleteConversation(100L, 1L))
                 .isInstanceOf(BusinessException.class);
+    }
+
+
+    // ──────────────────────────────────────────
+    // P5 Step 8: quota 校验 + usage fallback
+    // ──────────────────────────────────────────
+    @Test
+    @DisplayName("sendMessage: quotaService.check 抛异常 → LLM_QUOTA_EXCEEDED 不调 LLM")
+    void sendMessage_quota_exceeded_throws_before_llm() {
+        AiConversation conv = baseConv();
+        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
+        org.mockito.Mockito.doThrow(new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED, "配额用尽"))
+                .when(quotaService).check(eq(100L), anyLong());
+
+        SendMessageDto dto = new SendMessageDto();
+        dto.setContent("这条消息不该到达 LLM");
+
+        assertThatThrownBy(() -> service.sendMessage(100L, 1L, dto))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+
+        // LLM 不应被调用
+        verify(llmClient, times(0)).call(any());
+    }
+
+    @Test
+    @DisplayName("sendMessage: LLM 返回 usage=null 时仍调 recordRequest 计数")
+    void sendMessage_usage_null_still_records_request_counter() {
+        AiConversation conv = baseConv();
+
+        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
+        when(messageRepo.findMaxSeq(1L)).thenReturn(-1);
+        when(messageRepo.findByConversationIdOrderBySeqAsc(1L)).thenReturn(List.of());
+
+        AiMessage userSaved = newMessage(10L, 0, Role.USER.name(), "hi");
+        AiMessage aiSaved = newMessage(11L, 1, Role.ASSISTANT.name(), "hello");
+        when(messageRepo.save(any(AiMessage.class)))
+                .thenReturn(userSaved)
+                .thenReturn(aiSaved);
+
+        when(contextBuilder.build(any(), any())).thenReturn(List.of());
+
+        // LLM 返回 usage=null
+        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+                .content("hello")
+                .model("gpt-4o-mini")
+                .usage(null)
+                .build());
+
+        SendMessageDto dto = new SendMessageDto();
+        dto.setContent("hi");
+
+        service.sendMessage(100L, 1L, dto);
+
+        // usage=null 时应调 recordRequest(model) 而非 recordMetrics
+        verify(usageRecorder).recordRequest("openai:gpt-4o-mini");
+        verify(usageRecorder, times(0)).recordMetrics(any(), any());
     }
 
     // ──────────────────────────────────────────
