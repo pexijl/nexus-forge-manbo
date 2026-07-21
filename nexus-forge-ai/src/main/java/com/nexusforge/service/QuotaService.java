@@ -6,6 +6,8 @@ import com.nexusforge.config.AiProperties.QuotaTier;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.BusinessException;
 import com.nexusforge.repository.AiMessageUsageRepository;
+import com.nexusforge.user.UserQuotaOverride;
+import com.nexusforge.user.UserQuotaProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -16,17 +18,19 @@ import org.springframework.stereotype.Service;
 import java.time.OffsetDateTime;
 
 /**
- * P5 Step 5 — 用量配额校验服务。
+ * P5 Step 5/6 — 用量配额校验服务。
  *
  * <p>职责:在 {@link ConversationService#sendMessage} 调用 LLM 之前,检查该用户
  * 24h 累计 token / 请求次数是否超出配额。超出则抛
  * {@link BusinessException#BusinessException(ResultCode, String)}
  * ({@link ResultCode#LLM_QUOTA_EXCEEDED}),GlobalExceptionHandler 映射为 HTTP 429。
  *
- * <p>角色读取策略:从 {@link SecurityContextHolder} 拿当前 Authentication 的
- * {@link GrantedAuthority}(由 {@code JwtAuthenticationFilter} 在鉴权时写入),
- * 在 {@link QuotaConfig#getTiers()} 中匹配;若无匹配则落到
- * {@link QuotaConfig#getDefaultUserTier()}。
+ * <p>配额解析优先级(P5 Step 6):
+ * <ol>
+ *   <li>用户级覆盖 {@code users.plan_quota_override}(JSON,管理员可设)</li>
+ *   <li>角色级 tier {@link QuotaConfig#getTiers()}(按 SecurityContextHolder 角色匹配)</li>
+ *   <li>默认 tier {@link QuotaConfig#getDefaultUserTier()}</li>
+ * </ol>
  *
  * <p>配额开关:{@link QuotaConfig#isEnabled()} 为 false 时,check 直接放行,
  * 仅记录用量不做拦截(适合开发/测试环境)。
@@ -41,6 +45,7 @@ public class QuotaService {
 
     private final AiMessageUsageRepository usageRepo;
     private final AiProperties aiProperties;
+    private final UserQuotaProvider userQuotaProvider;
 
     /**
      * 校验 userId 的 24h 配额。超出则抛 {@link BusinessException}。
@@ -61,10 +66,10 @@ public class QuotaService {
             return;
         }
 
-        QuotaTier tier = resolveTier(quota);
+        QuotaTier tier = resolveTier(quota, userId);
         if (tier.getDailyTokenLimit() == null && tier.getRequestLimit() == null) {
             // 该角色完全不限,直接放行(避免无意义的 DB 查询)
-            log.debug("[Quota] 角色 tier 不限,放行 userId={}", userId);
+            log.debug("[Quota] tier 不限,放行 userId={}", userId);
             return;
         }
 
@@ -94,10 +99,19 @@ public class QuotaService {
     }
 
     /**
-     * 从 SecurityContextHolder 读取当前用户的第一个角色,
-     * 在 tiers 中查找;找不到则落到 defaultUserTier。
+     * 解析配额 tier。优先级:用户级覆盖 → 角色级 tier → 默认 tier。
      */
-    private QuotaTier resolveTier(QuotaConfig quota) {
+    private QuotaTier resolveTier(QuotaConfig quota, Long userId) {
+        // 1. 用户级覆盖(P5 Step 6)
+        var userOverride = userQuotaProvider.getPlanQuotaOverride(userId);
+        if (userOverride.isPresent()) {
+            QuotaTier tier = toTier(userOverride.get());
+            log.debug("[Quota] 使用用户级覆盖: userId={}, tokenLimit={}, reqLimit={}",
+                    userId, tier.getDailyTokenLimit(), tier.getRequestLimit());
+            return tier;
+        }
+
+        // 2. 角色级 tier(从 SecurityContextHolder 读角色)
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null) {
             for (GrantedAuthority ga : auth.getAuthorities()) {
@@ -108,16 +122,23 @@ public class QuotaService {
                 }
             }
         }
-        // fallback
+
+        // 3. 默认 tier fallback
         QuotaTier fallback = quota.getTiers().get(quota.getDefaultUserTier().toUpperCase());
         if (fallback == null) {
             log.warn("[Quota] defaultUserTier '{}' 未在 tiers 中配置,放行", quota.getDefaultUserTier());
-            // 返回一个不限的 tier,避免 NPE
             QuotaTier open = new QuotaTier();
             open.setDailyTokenLimit(null);
             open.setRequestLimit(null);
             return open;
         }
         return fallback;
+    }
+
+    private QuotaTier toTier(UserQuotaOverride override) {
+        QuotaTier tier = new QuotaTier();
+        tier.setDailyTokenLimit(override.dailyTokenLimit());
+        tier.setRequestLimit(override.requestLimit());
+        return tier;
     }
 }
