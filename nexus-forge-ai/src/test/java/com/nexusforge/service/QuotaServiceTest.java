@@ -49,6 +49,7 @@ class QuotaServiceTest {
     private static final Long USER_ID = 1L;
 
     @Mock AiMessageUsageRepository usageRepo;
+    @Mock com.nexusforge.user.UserQuotaProvider userQuotaProvider;
 
     private QuotaService service;
     private AiProperties props;
@@ -56,7 +57,7 @@ class QuotaServiceTest {
     @BeforeEach
     void setUp() {
         props = new AiProperties();
-        service = new QuotaService(usageRepo, props);
+        service = new QuotaService(usageRepo, props, userQuotaProvider);
         // 模拟 JwtAuthenticationFilter: authorities = ["USER"] (无 ROLE_ 前缀)
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("testuser", null,
@@ -210,6 +211,75 @@ class QuotaServiceTest {
 
             service.check(USER_ID);
             // 不抛(NPE 防御)
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // 用户级覆盖(P5 Step 6)
+    // ──────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("用户级覆盖(plan_quota_override)")
+    class UserOverride {
+
+        @Test
+        @DisplayName("用户级覆盖优先于角色 tier")
+        void user_override_takes_precedence() {
+            // 角色 tier: 不限
+            QuotaTier roleTier = new QuotaTier();
+            roleTier.setDailyTokenLimit(null);
+            roleTier.setRequestLimit(null);
+            props.getQuota().setTiers(Map.of("USER", roleTier));
+
+            // 用户覆盖: 严格限制
+            when(userQuotaProvider.getPlanQuotaOverride(USER_ID))
+                    .thenReturn(java.util.Optional.of(
+                            new com.nexusforge.user.UserQuotaOverride(1000L, 10L)));
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 500, 5));
+
+            service.check(USER_ID);
+            // 走用户覆盖(1000/10),不走角色不限 tier。用量在限额内 → 放行
+        }
+
+        @Test
+        @DisplayName("用户级覆盖 token 超限 → 抛 LLM_QUOTA_EXCEEDED")
+        void user_override_token_exceeded() {
+            when(userQuotaProvider.getPlanQuotaOverride(USER_ID))
+                    .thenReturn(java.util.Optional.of(
+                            new com.nexusforge.user.UserQuotaOverride(1000L, 100L)));
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 1500, 5));
+
+            assertThatThrownBy(() -> service.check(USER_ID))
+                    .extracting(e -> ((BusinessException) e).getCode())
+                    .isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+        }
+
+        @Test
+        @DisplayName("用户级覆盖请求超限 → 抛 LLM_QUOTA_EXCEEDED")
+        void user_override_request_exceeded() {
+            when(userQuotaProvider.getPlanQuotaOverride(USER_ID))
+                    .thenReturn(java.util.Optional.of(
+                            new com.nexusforge.user.UserQuotaOverride(10000L, 10L)));
+            when(usageRepo.sumByUserAndWindow(eq(USER_ID), any(), any()))
+                    .thenReturn(new UsageAggregateRow(0, 0, 500, 15));
+
+            assertThatThrownBy(() -> service.check(USER_ID))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getCode())
+                    .isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+        }
+
+        @Test
+        @DisplayName("用户级覆盖两 null → 不限,不查 DB")
+        void user_override_unlimited() {
+            when(userQuotaProvider.getPlanQuotaOverride(USER_ID))
+                    .thenReturn(java.util.Optional.of(
+                            new com.nexusforge.user.UserQuotaOverride(null, null)));
+
+            service.check(USER_ID);
+            // 不抛,不查 DB
         }
     }
 }
