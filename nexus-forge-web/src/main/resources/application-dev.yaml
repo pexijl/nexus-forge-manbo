@@ -15,9 +15,21 @@ spring:
       maximum-pool-size: 20 # Hikari连接池的最大连接数
       minimum-idle: 5 # Hikari连接池的最小空闲连接数
       connection-timeout: 30000 # Hikari连接池的连接超时时间（毫秒）
+  flyway:
+    # 迁移脚本位置:nexus-forge-user/src/main/resources/db/migration
+    locations: classpath:db/migration
+    # 已有库的非空 schema,baseline-on-migrate=true 让 Flyway 在 schema 非空时自动打 baseline,
+    # 然后从 baseline-version 之后继续应用迁移(不会因为"找不到 baseline"报错)
+    baseline-on-migrate: true
+    # 自动调用 validate 校验已应用迁移的 checksum
+    validate-on-migrate: true
+    enabled: true
   jpa:
     hibernate:
-      ddl-auto: update # 开发环境使用update，自动更新数据库结构
+      # ddl-auto=none:Flyway 是建表的唯一权威源,不让 Hibernate 去校验/建表。
+      # 之前用的 validate 在 Spring Boot 4.1 + Flyway 手写集成的场景下,
+      # 会在某些版本里早于 Flyway 跑,导致"实体期待的字段在表里不存在"假阳性报错。
+      ddl-auto: none
     properties:
       hibernate:
         format_sql: false # 格式化SQL语句，方便阅读
@@ -25,8 +37,28 @@ spring:
     open-in-view: false # 关闭Open Session in View，避免性能问题和潜在的内存泄漏
   ai:
     enabled: ${SPRING_AI_ENABLED:true}
-    default-vendor: ${SPRING_AI_DEFAULT_VENDOR:openai}
-    default-model: ${SPRING_AI_DEFAULT_MODEL:gpt-4o-mini}
+    default-vendor: ${SPRING_AI_DEFAULT_VENDOR:qwen}
+    # 注意:default-model(根级)默认不配;管理员通过 PUT /api/admin/ai/global-default
+    # 写入 ai_global_default 表后,系统模式调用才会用上 model。
+    # 启动校验:每个 enabled=true 的 vendor 必须有 yaml-level default-model(否则
+    # 容器构造失败 fail-fast);但运行时 system 模式请求一律从 ai_global_default 表读,
+    # 不会被 yaml 兜底值覆盖。
+    # default-model: ${SPRING_AI_DEFAULT_MODEL:qwen3.6-27b}
+    providers:
+      # 关闭 OpenAI(国内网络不通,留着只是被构造时抛 LLM_CONFIG_MISSING)
+      openai:
+        enabled: false
+      # DeepSeek 关闭(Qwen 验证期间不启用,需要时打开即可)
+      deepseek:
+        enabled: false
+      # 阿里云通义千问(Qwen / DashScope OpenAI 兼容模式)
+      qwen:
+        enabled: true
+        # vendor-level default-model:仅用于容器构造期,vendor-level default-model 兜底。
+        # 启动后不会影响 ai_global_default 表的 model;system 模式请求一律从表读。
+        # 用户感知到的"全局模型"完全由 ai_global_default 表控制(管理员通过 admin API 改)。
+        default-model: ${SPRING_AI_QWEN_DEFAULT_MODEL:qwen-turbo}
+        api-key: ${DASHSCOPE_API_KEY}
     # P5 — Token 用量配额(24h 滑窗,长期防刷)
     quota:
       enabled: ${SPRING_AI_QUOTA_ENABLED:true}
