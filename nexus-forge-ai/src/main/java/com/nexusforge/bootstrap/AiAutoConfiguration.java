@@ -1,5 +1,6 @@
 package com.nexusforge.bootstrap;
 
+import com.nexusforge.ai.client.ApiKeyCipher;
 import com.nexusforge.config.AiProperties;
 import com.nexusforge.model.ChatModel;
 import com.nexusforge.client.FunctionCallAggregator;
@@ -9,6 +10,7 @@ import com.nexusforge.router.ChatModelRouter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -105,6 +107,19 @@ public class AiAutoConfiguration {
     @ConditionalOnMissingBean(ChatModelHttpSupport.class)
     public ChatModelHttpSupport chatModelHttpSupport(AiProperties props) {
         return new ChatModelHttpSupport(props);
+    }
+
+    /**
+     * P7 — 用户私 Key 加解密工具。AES-256-GCM,主密钥派生自
+     * {@code spring.ai.preference.master-key},缺省时降级用 {@code jwt.secret}。
+     * 非 Spring bean(无状态 + 不可注入其他依赖),这里显式 @Bean 注入。
+     */
+    @Bean
+    @ConditionalOnMissingBean(ApiKeyCipher.class)
+    public ApiKeyCipher apiKeyCipher(
+            @Value("${spring.ai.preference.master-key:}") String masterKey,
+            @Value("${jwt.secret:}") String jwtSecret) {
+        return new ApiKeyCipher(masterKey, jwtSecret);
     }
 
     /**

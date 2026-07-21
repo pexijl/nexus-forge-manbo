@@ -47,7 +47,8 @@ public enum ResultCode {
     LLM_RATE_LIMITED(3006, "LLM 请求被速率限制"),
     LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽"),
     LLM_ALL_VENDORS_FAILED(3008, "所有降级链均失败"),
-    LLM_CIRCUIT_OPEN(3009, "降级链已熔断,暂不可用");
+    LLM_CIRCUIT_OPEN(3009, "降级链已熔断,暂不可用"),
+    LLM_GLOBAL_DEFAULT_NOT_CONFIGURED(3010, "全局 AI 模型未配置:管理员必须先调用 /api/admin/ai/global-default");
 
     private final Integer code;
     private final String message;
