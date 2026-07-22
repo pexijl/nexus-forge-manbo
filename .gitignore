@@ -46,14 +46,8 @@ docker/MinIO/minio.license
 **/application-secret.yaml
 /WATCHDOG.yml
 # Local planning doc for LLM gateway (kept untracked on purpose)
-/docs/AI-GATEWAY-PLAN.md
+docs/
 /.mcp.json
-/docs/AI-GATEWAY-P1-IMPLEMENTATION.md
-/docs/AI-GATEWAY-P2-IMPLEMENTATION.md
-/docs/AI-GATEWAY-P3-IMPLEMENTATION.md
-/docs/AI-GATEWAY-P4-IMPLEMENTATION.md
-/docs/AI-GATEWAY-P4-STEP12-PLAN.md
-/docs/AI-GATEWAY-P5-PLAN.md
 
 # Reasonix agent 缓存(本地思考轨迹 + Reasonix skill store)
 /.reasonix/
