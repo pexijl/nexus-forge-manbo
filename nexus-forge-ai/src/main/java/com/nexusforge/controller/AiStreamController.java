@@ -28,6 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * P2 流式端点:POST /api/ai/chat/stream,以 {@code text/event-stream} 回传 ChatChunk 流。
@@ -87,15 +88,27 @@ public class AiStreamController {
     }
 
     private void writeChunks(OutputStream output, Flux<ChatChunk> chunks) {
+        // 单次订阅 + latch 阻塞:Reactor subscribe 本身是非阻塞,必须等流完成才返回 writeTo,
+        // 否则 Spring 会在异步线程刚拿到 OutputStream 后立刻关掉它,客户端拿不到完整 SSE。
+        // 早期版本用 chunks.subscribe(...) + chunks.blockLast() 触发 cold Flux 的双订阅,
+        // 等于向 LLM 发起两次 HTTP 请求 —— 实测日志看到 [LLM stream pref] signal=onComplete
+        // 出现两次,且第二次 tokens=0/0(连接已被首次消费完),纯浪费并污染客户端 chunk 序列。
+        CountDownLatch done = new CountDownLatch(1);
+        chunks.subscribe(
+                chunk -> writeFrame(output, chunk),
+                err -> {
+                    try {
+                        writeErrorFrame(output, err);
+                    } finally {
+                        done.countDown();
+                    }
+                },
+                () -> done.countDown());
         try {
-            chunks.subscribe(
-                    chunk -> writeFrame(output, chunk),
-                    err -> writeErrorFrame(output, err),
-                    () -> writeDoneFrame(output));
-            // 等待流完成
-            chunks.blockLast();
-        } catch (Exception e) {
-            log.warn("[AI stream] chunk 写入异常: {}", e.toString());
+            done.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[AI stream] chunk 写入被中断");
         }
     }
 
