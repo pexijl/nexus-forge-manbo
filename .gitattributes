@@ -1,10 +1,30 @@
 # 统一 LF 换行,避免跨平台协作时 CRLF/LF 混合造成 diff 噪音
-*.json      text eol=lf
-*.yml       text eol=lf
-*.yaml      text eol=lf
-*.ts        text eol=lf
-*.vue       text eol=lf
-*.scss      text eol=lf
-*.css       text eol=lf
-*.gradle    text eol=lf
-*.properties text eol=lf
+# 涵盖常见源码 / 配置 / 文档 / 脚本类型;二进制(jpg/png/jar/war/...)与
+# gradle-wrapper.jar / *.db 等保留 Git 默认行为,不在此声明。
+
+*.json          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.ts            text eol=lf
+*.vue           text eol=lf
+*.scss          text eol=lf
+*.css           text eol=lf
+*.gradle        text eol=lf
+*.properties    text eol=lf
+*.java          text eol=lf
+*.md            text eol=lf
+*.markdown      text eol=lf
+*.env           text eol=lf
+*.env.*         text eol=lf
+*.gitignore     text eol=lf
+*.gitattributes text eol=lf
+*.bat           text eol=lf
+*.cmd           text eol=lf
+*.html          text eol=lf
+*.htm           text eol=lf
+*.svg           text eol=lf
+*.sql           text eol=lf
+*.xml           text eol=lf
+*.prettierrc    text eol=lf
+*.prettierignore text eol=lf
+gradlew         text eol=lf
