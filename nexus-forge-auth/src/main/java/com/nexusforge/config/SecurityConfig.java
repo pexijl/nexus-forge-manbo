@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import jakarta.servlet.DispatcherType;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -61,6 +62,13 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 接口权限控制
                 .authorizeHttpRequests(auth -> auth
+                        // Spring Boot 内部错误派发:Tomcat 在 async dispatch 完成后,如果响应进入
+                        // ErrorReportValve,会以 DispatcherType=ERROR 派发到 /error;ASyncContext.complete
+                        // 触发的 ASYNC 重派发也可能再走一遍链。此类派发线程上没有 SecurityContext,
+                        // AuthorizationFilter 会以匿名身份重跑整条链 → AuthorizationDeniedException
+                        // (响应已 commit,客户端无感知,仅日志噪声)。按 DispatcherType 放行最稳,
+                        // 不依赖 URL 匹配。
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()  // SpringDoc
                         .requestMatchers("/actuator/health", "/actuator/metrics/**", "/actuator/prometheus/**").permitAll()
