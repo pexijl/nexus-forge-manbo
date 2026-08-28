@@ -45,6 +45,10 @@ public class ConversationService {
      * 与 Spring 7 Boot 默认 {@code tools.jackson.databind.ObjectMapper} bean 一致。
      */
     private final ObjectMapper objectMapper;
+    /** P4 Step 12:工具调用循环用的注册表(收集所有 {@code ToolExecutor} bean)。 */
+    private final com.nexusforge.client.ToolRegistry toolRegistry;
+    /** P4 Step 12:读 {@code maxToolTurns} 控制工具循环上限。 */
+    private final com.nexusforge.config.AiProperties props;
 
     // ──────────────────────────────────────────────
     // 创建会话
@@ -125,9 +129,11 @@ public class ConversationService {
         try {
             if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
                 ChatModel privateModel = preferenceResolver.resolveChatModel(pref);
-                response = llmClient.call(request, privateModel);
+                // P4 Step 12:工具调用循环(私 Key 路径,不走降级链)
+                response = llmClient.callWithToolLoop(request, privateModel, toolRegistry, props.getMaxToolTurns());
             } else {
-                response = llmClient.call(request);
+                // P4 Step 12:工具调用循环(系统 Key 路径,走降级链)
+                response = llmClient.callWithToolLoop(request, toolRegistry, props.getMaxToolTurns());
             }
         } catch (Exception e) {
             log.error("[AI] LLM 调用失败: convId={}, model={}, mode={}", conversationId, conv.getModel(), pref.source(), e);

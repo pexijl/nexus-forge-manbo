@@ -7,6 +7,7 @@ import com.nexusforge.ai.Role;
 import com.nexusforge.ai.ToolCall;
 import com.nexusforge.ai.service.PreferenceResolver;
 import com.nexusforge.client.LlmClient;
+import com.nexusforge.client.ToolRegistry;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
 import com.nexusforge.controller.dto.UpdateTitleDto;
@@ -38,6 +39,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -74,6 +76,10 @@ class ConversationServiceTest {
     @Mock tools.jackson.databind.ObjectMapper objectMapper;
     /** P7:用户偏好解析器。默认 stub 为 SYSTEM 模式(等价于没有用户偏好、沿用全局默认) */
     @Mock PreferenceResolver preferenceResolver;
+    /** P4 Step 12:工具调用循环用的注册表。ConversationService 把这个传给 LlmClient.callWithToolLoop。 */
+    @Mock com.nexusforge.client.ToolRegistry toolRegistry;
+    /** P4 Step 12:ConversationService 读 {@code props.getMaxToolTurns()} 决定循环上限。Mock 默认返回 0,不影响 stub。 */
+    @Mock com.nexusforge.config.AiProperties props;
 
     @InjectMocks ConversationService service;
 
@@ -167,7 +173,7 @@ class ConversationServiceTest {
         when(contextBuilder.build(any(), eq("openai:gpt-4o-mini")))
                 .thenReturn(List.of(ChatMessage.builder().role(Role.USER).content("你好").build()));
 
-        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
                 .id("resp-1")
                 .model("gpt-4o-mini")
                 .content("你好!有什么可以帮你的?")
@@ -218,7 +224,7 @@ class ConversationServiceTest {
                 .arguments(new tools.jackson.databind.ObjectMapper()
                         .readTree("{\"city\":\"Beijing\"}"))
                 .build();
-        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
                 .id("resp-2")
                 .model("gpt-4o-mini")
                 .content(null)  // tool_calls 终止时 content 通常为 null
@@ -268,7 +274,7 @@ class ConversationServiceTest {
             return m;
         });
         when(contextBuilder.build(any(), any())).thenReturn(List.of());
-        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
                 .content("ok")
                 .model("gpt-4o-mini")
                 .usage(ChatUsage.builder().promptTokens(1).completionTokens(1).totalTokens(2).build())
@@ -300,7 +306,7 @@ class ConversationServiceTest {
             return m;
         });
         when(contextBuilder.build(any(), eq("openai:gpt-4o"))).thenReturn(List.of());
-        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
                 .content("hi")
                 .model("gpt-4o")
                 .usage(ChatUsage.builder().promptTokens(1).completionTokens(1).totalTokens(2).build())
@@ -499,7 +505,7 @@ class ConversationServiceTest {
         when(contextBuilder.build(any(), any())).thenReturn(List.of());
 
         // LLM 返回 usage=null
-        when(llmClient.call(any())).thenReturn(ChatResponse.builder()
+        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
                 .content("hello")
                 .model("gpt-4o-mini")
                 .usage(null)

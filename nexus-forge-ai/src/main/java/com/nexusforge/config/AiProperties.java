@@ -180,6 +180,14 @@ public class AiProperties {
     private List<String> fallbackChain = new ArrayList<>();
 
     /**
+     * P4 Step 12: 工具调用循环的最大总轮次(含首次 LLM 调用)。
+     * 默认 3 表示最多 3 次 LLM 调用:1 次首调 + 至多 2 次工具回灌后再调。
+     * 达到上限且仍返回 tool_calls 时,返回最后一次响应(可能 content=null、toolCalls 非空)。
+     */
+    @Min(1)
+    private int maxToolTurns = 3;
+
+    /**
      * P5 — 用量配额配置。
      *
      * <p>职责:DB SUM 24h 滑窗,长期防刷,抵御累积型滥用(单用户连续数小时调用)。

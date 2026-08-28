@@ -1,8 +1,11 @@
 package com.nexusforge.client;
 
 import com.nexusforge.ai.ChatChunk;
+import com.nexusforge.ai.ChatMessage;
 import com.nexusforge.ai.ChatRequest;
 import com.nexusforge.ai.ChatResponse;
+import com.nexusforge.ai.Role;
+import com.nexusforge.ai.ToolCall;
 import com.nexusforge.config.AiProperties;
 import com.nexusforge.error.StreamTimeoutException;
 import com.nexusforge.enums.ResultCode;
@@ -15,10 +18,13 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 /**
  * LLM 门面。其他模块(如未来可能的 nexus-forge-visual 摘要生成)只依赖此门面,
@@ -420,5 +426,112 @@ public class LlmClient {
                 .options(src.getOptions())
                 .tools(src.getTools())
                 .build();
+    }
+
+    // ──────────────────────────────────────────────
+    // P4 Step 12:Function Calling 闭环
+    // ──────────────────────────────────────────────
+
+    /**
+     * 系统 Key 路径:走降级链,命中 {@code finishReason="tool_calls"} 时自动执行工具、
+     * 回灌 TOOL 消息、再调一次,直到返回 {@code stop} 或达到 {@code maxTurns} 上限。
+     *
+     * <p>当前请求 {@code finishReason != "tool_calls"} 或 {@code toolCalls} 为空时,
+     * 行为完全等同 {@link #call(ChatRequest)} —— 不会修改原始 {@code request}。
+     */
+    public ChatResponse callWithToolLoop(ChatRequest req, ToolRegistry registry, int maxTurns) {
+        ChatResponse resp = call(req);
+        return runToolLoop(req, resp, this::call, registry, maxTurns);
+    }
+
+    /**
+     * 私 Key 路径:与 {@link #callWithToolLoop(ChatRequest, ToolRegistry, int)} 行为一致,
+     * 但每次重调走 {@link #call(ChatRequest, ChatModel)} —— 不走降级链、不污染熔断计数。
+     */
+    public ChatResponse callWithToolLoop(ChatRequest req, ChatModel privateKeyModel,
+                                         ToolRegistry registry, int maxTurns) {
+        ChatResponse resp = call(req, privateKeyModel);
+        return runToolLoop(req, resp, r -> call(r, privateKeyModel), registry, maxTurns);
+    }
+
+    /**
+     * 工具调用循环主体。共享给系统路径({@code this::call})和私 Key 路径
+     * ({@code r -> call(r, privateKeyModel)})。
+     *
+     * <p>循环条件:尚未达到 {@code maxTurns} + 当前响应 {@code finishReason="tool_calls"}
+     * 且 {@code toolCalls} 非空。每轮:
+     * <ol>
+     *   <li>把当前 assistant 消息(含 {@code toolCalls})追加到消息尾部</li>
+     *   <li>按 {@code toolCall.id} 一一执行工具,执行结果回灌为 {@code role=TOOL} 消息</li>
+     *   <li>用更新后的消息集构造新 ChatRequest,经 {@code reCall} 再调一次 LLM</li>
+     * </ol>
+     *
+     * <p>边界:
+     * <ul>
+     *   <li>工具名未注册或抛异常 → 注入 {@code ToolResult.error(...)} 让模型看到失败信息,而不是默默结束</li>
+     *   <li>达到 {@code maxTurns} 仍返回 {@code tool_calls} → 返回最后一次响应(可能 {@code content=null})</li>
+     *   <li>循环过程中构造的新 ChatRequest 是副本,原始 {@code req} 不被 mutate</li>
+     * </ul>
+     */
+    private ChatResponse runToolLoop(ChatRequest req, ChatResponse resp,
+                                     Function<ChatRequest, ChatResponse> reCall,
+                                     ToolRegistry registry, int maxTurns) {
+        int turn = 1;
+        while (turn < maxTurns
+                && "tool_calls".equals(resp.getFinishReason())
+                && resp.getToolCalls() != null
+                && !resp.getToolCalls().isEmpty()) {
+            log.info("[ToolLoop] turn={}/{} toolCalls={}", turn, maxTurns, resp.getToolCalls().size());
+
+            List<ChatMessage> msgs = new ArrayList<>(req.getMessages());
+            // 1. 把当前 assistant 消息(带 toolCalls)回灌
+            msgs.add(ChatMessage.builder()
+                    .role(Role.ASSISTANT)
+                    .content(resp.getContent())
+                    .toolCalls(resp.getToolCalls())
+                    .build());
+            // 2. 一一执行工具,把结果回灌为 TOOL 消息
+            for (ToolCall tc : resp.getToolCalls()) {
+                ToolResult result;
+                try {
+                    ToolExecutor exec = registry.lookup(tc.getName());
+                    if (exec == null) {
+                        log.warn("[ToolLoop] tool={} 未注册,注入错误结果", tc.getName());
+                        result = ToolResult.error("Unknown tool: " + tc.getName());
+                    } else {
+                        result = exec.execute(tc.getArguments());
+                    }
+                } catch (Exception e) {
+                    log.warn("[ToolLoop] tool={} 抛出异常: {}", tc.getName(), e.toString());
+                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    result = ToolResult.error(msg);
+                }
+                log.info("[ToolLoop] turn={} tool={} id={} isError={} contentLen={}",
+                        turn, tc.getName(), tc.getId(), result.isError(), result.content().length());
+                msgs.add(ChatMessage.builder()
+                        .role(Role.TOOL)
+                        .name(tc.getId())
+                        .content(result.content())
+                        .build());
+            }
+
+            // 3. 用更新后的消息集构造新 ChatRequest(保留 model / tools / options 等)
+            req = ChatRequest.builder()
+                    .model(req.getModel())
+                    .messages(msgs)
+                    .temperature(req.getTemperature())
+                    .maxTokens(req.getMaxTokens())
+                    .stream(req.getStream())
+                    .options(req.getOptions())
+                    .tools(req.getTools())
+                    .build();
+            // 4. 再调一次
+            resp = reCall.apply(req);
+            turn++;
+        }
+        if ("tool_calls".equals(resp.getFinishReason())) {
+            log.warn("[ToolLoop] 已达 maxTurns={} 仍未终止(仍为 tool_calls),直接返回最后一次响应", maxTurns);
+        }
+        return resp;
     }
 }
