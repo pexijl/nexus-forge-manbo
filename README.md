@@ -84,7 +84,7 @@ nexus-forge-auth/src/main/java/com/nexusforge/
 
 ```
 nexus-forge-core/src/main/java/com/nexusforge/
-├── NexusForgeCoreAutoConfiguration.java   # Spring Boot 4 `@AutoConfiguration` 自动装配。注意:Spring Boot 4 已删除 `spring.factories` 机制,该 auto-config 需要 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 资源文件才会被加载(本模块当前**没有**该文件,因此这个 auto-config 实际是 no-op;`@Component` 类(`RequestIdFilter`、`@Idempotent`、`@RateLimit`、`GlobalExceptionHandler`)由 `nexus-forge-web` 的 `@SpringBootApplication` 默认 component scan 负责注册)
+├── (无 auto-config)                      # `RequestIdFilter` / `@Idempotent` / `@RateLimit` / `GlobalExceptionHandler` 等 `@Component` / `@Aspect` 类在 `com.nexusforge.{log,idempotent,ratelimit,error}` 下,由 `nexus-forge-web` 的 `@SpringBootApplication` 默认扫描 `com.nexusforge.*` 负责注册。早期有个 `NexusForgeCoreAutoConfiguration.java`,但 Spring Boot 4 已删除 `spring.factories` 机制,而模块缺 `META-INF/spring/...AutoConfiguration.imports` 资源文件,所以该 auto-config 实际从未被加载,已删除
 ├── error/          # GlobalExceptionHandler(统一异常处理)
 ├── log/            # 请求 ID + MDC 链路追踪 + WebLog AOP
 ├── idempotent/     # @Idempotent 注解 + Redis SET NX EX
