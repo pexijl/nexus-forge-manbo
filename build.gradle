@@ -46,7 +46,11 @@ subprojects {
 	dependencyManagement {
 		dependencies {
 			dependency "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdocVersion}"
+			// P2 流式:WebClient 用 Reactor Netty 传输层。spring-web 的 ReactorClientHttpConnector
+			// 构造器签名是 (reactor.netty.http.client.HttpClient),而该类位于 reactor-netty-http,
+			// 不在 reactor-netty-core。两 jar 必须保持同版本,故同走 reactorNettyVersion。
 			dependency "io.projectreactor.netty:reactor-netty-core:${reactorNettyVersion}"
+			dependency "io.projectreactor.netty:reactor-netty-http:${reactorNettyVersion}"
 		}
 	}
 

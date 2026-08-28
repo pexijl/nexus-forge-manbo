@@ -3,6 +3,7 @@ package com.nexusforge.stream;
 import com.nexusforge.ai.ChatChunk;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import com.nexusforge.ai.DeltaToolCall;
@@ -10,6 +11,7 @@ import tools.jackson.databind.JsonNode;
 
 import java.io.BufferedReader;
 import java.io.StringReader;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -26,6 +28,7 @@ import java.util.function.Consumer;
  * <p>本类负责把上游 byte stream 切成事件,把每个事件转为 {@link ChatChunk} 或
  * 终止信号。基于 WebFlux 的 {@code Flux<ChatChunk>},上游断开时下游订阅被自动取消。
  */
+@Slf4j
 @Component
 public class OpenAiStreamParser {
 
@@ -86,23 +89,30 @@ public class OpenAiStreamParser {
 
     /**
      * 流式入口:接收上游 {@link WebClient#bodyToFlux(Class) bodyToFlux(String.class)}
-     * 给出的行片段(每个片段可能包含 0 个、1 个或多个 SSE 事件),按 {@code \n\n} 分隔
+     * 给出的 SSE 帧片段(每个片段可能包含 0 个、1 个或多个 SSE 事件),按 {@code \n\n} 分隔
      * 解析为 {@link ChatChunk} 序列。订阅断开时,Reactor 自动 dispose 上游,
      * {@link WebClient} 的 HTTP 连接随之关闭。
      *
      * <p>每个订阅拥有独立的 {@code StringBuilder buffer}(通过 {@link Flux#create} 闭包捕获),
      * 不会跨订阅共享状态。
+     *
+     * <p><b>契约前提</b>:此方法假设上游 {@code bodyToFlux(String.class)} 返回的是
+     * <em>原始 SSE wire 格式</em>(即 {@code data: <json>\n\n} 序列)。在 Spring MVC
+     * 容器里用 {@code .accept(MediaType.TEXT_PLAIN)} 而不是 TEXT_EVENT_STREAM 才能
+     * 走 {@code StringDecoder} 而不是 {@code SseEventDecoder}(后者会剥掉 {@code data:}
+     * 前缀与 {@code \n\n} 分隔,导致本方法永远拿不到事件边界)。
      */
     public Flux<ChatChunk> parseLines(Flux<String> chunks) {
         return Flux.create(sink -> {
             StringBuilder buf = new StringBuilder();
+            AtomicInteger emittedCount = new AtomicInteger();
             Consumer<String> onChunk = chunk -> {
                 buf.append(chunk);
-                // 反复抽取完整事件,直到缓冲里没有完整的 \n\n
+                // 反复抽取完整事件(\n\n),直到缓冲里没有完整的 \n\n
                 int boundary;
                 while ((boundary = indexOfEventBoundary(buf)) >= 0) {
                     String event = buf.substring(0, boundary);
-                    buf.delete(0, boundary + 2);   // 去掉事件 + \n\n
+                    buf.delete(0, boundary + 2);   // 去迴事件 + \n\n
                     ChatChunk c = processEventBlock(event);
                     if (c == null) {
                         // [DONE] 终止符;后续可能还有 trailing 注释/心跳,直接吃掉
@@ -110,9 +120,76 @@ public class OpenAiStreamParser {
                         return;
                     }
                     sink.next(c);
+                    emittedCount.incrementAndGet();
                 }
             };
-            chunks.subscribe(onChunk, sink::error, sink::complete);
+            // 防御性 onComplete:上游可能在最后一段 chunk 没有 \n\n 终止符就关闭
+            // (qwen DashScope / 部分代理服务器实测会这样),残留 buffer 视为最后一个事件。
+            Runnable onComplete = () -> {
+                if (buf.length() > 0) {
+                    ChatChunk c = processEventBlock(buf.toString());
+                    if (c != null) {
+                        sink.next(c);
+                        emittedCount.incrementAndGet();
+                    }
+                }
+                if (emittedCount.get() == 0) {
+                    // 上游 HTTP 200 但 0 帧:body 极可能是非 SSE 错误体或空。
+                    // 现状不强制 sink.error(避免改动既有契约),但记 warn 把现象暴露出来,
+                    // 排障时一眼能看到"上游没发任何 SSE 帧"而非被默认 onComplete 吞掉。
+                    log.warn("[OpenAiStreamParser] 上游 SSE 流完成时 0 帧已发射:body 可能非 SSE、"
+                            + "为空或被代理截断。检查上游响应 content-type 与 body 字节。");
+                }
+                sink.complete();
+            };
+            chunks.subscribe(onChunk, sink::error, onComplete);
+        });
+    }
+
+    /**
+     * 流式入口(已解码事件):接收 Spring {@code SseEventDecoder} 解码后的事件
+     * payload(每个元素是单条 {@code data:} 的 JSON 字符串,已剥离 {@code data:} 前缀
+     * 与 {@code \n\n} 分隔),直接转为 {@link ChatChunk} 序列。
+     *
+     * <p>与 {@link #parseLines(Flux)} 的差异:
+     * <ul>
+     *   <li>上游已按事件切分,本方法不做缓冲与 {@code \n\n} 边界查找</li>
+     *   <li>每个元素必是单条 {@code data:} 内容,不包含 `event:` / 多行 / 注释</li>
+     *   <li>{@code [DONE]} 以 payload 形式作为终止信号</li>
+     * </ul>
+     *
+     * <p>何时用哪个:
+     * <ul>
+     *   <li>上游 accept = {@code text/event-stream} → Spring 选 {@code SseEventDecoder} → 走本方法</li>
+     *   <li>上游 accept = {@code text/plain}        → Spring 选 {@code StringDecoder}(原始 SSE wire) → 走 {@link #parseLines}</li>
+     * </ul>
+     */
+    public Flux<ChatChunk> parseEvents(Flux<String> eventPayloads) {
+        return Flux.create(sink -> {
+            AtomicInteger emittedCount = new AtomicInteger();
+            Consumer<String> onNext = payload -> {
+                if (payload == null || payload.isEmpty()) {
+                    return;     // 心跳
+                }
+                if ("[DONE]".contentEquals(payload)) {
+                    sink.complete();
+                    return;
+                }
+                ChatChunk c = parseDataLine(payload);
+                if (c == null) {
+                    return;     // 单条解析失败:与 parseLines 行为一致,吞掉不炸整条流
+                }
+                sink.next(c);
+                emittedCount.incrementAndGet();
+            };
+            Runnable onComplete = () -> {
+                if (emittedCount.get() == 0) {
+                    log.warn("[OpenAiStreamParser] 上游 SSE 流完成时 0 帧已发射:body 可能非 SSE、"
+                            + "为空或被代理截断。检查上游响应 content-type 与 body 字节。");
+                }
+                sink.complete();
+            };
+            eventPayloads.subscribe(onNext, sink::error, onComplete);
         });
     }
 

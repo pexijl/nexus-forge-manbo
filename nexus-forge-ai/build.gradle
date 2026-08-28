@@ -24,10 +24,13 @@ dependencies {
     implementation 'org.springframework.security:spring-security-core'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
     implementation 'io.projectreactor:reactor-core'
-    // P2 流式:WebClient API + Reactor Netty 客户端传输(reactor-netty-core 在 Spring Boot 4.x
-    // BOM 不被管理,由根 build.gradle 的 dependencyManagement 统一定义 reactorNettyVersion = '1.2.6')
+    // P2 流式:WebClient API + Reactor Netty 客户端传输。spring-web 的
+    // ReactorClientHttpConnector 构造器签名是 (reactor.netty.http.client.HttpClient),
+    // 该类位于 reactor-netty-http(不是 reactor-netty-core)。两 jar 必须同版本,
+    // 由根 build.gradle dependencyManagement 的 reactorNettyVersion = '1.2.6' 统一管理。
     implementation 'org.springframework:spring-webflux'
     implementation 'io.projectreactor.netty:reactor-netty-core'
+    implementation 'io.projectreactor.netty:reactor-netty-http'
     // P5 Step 4: UsageRecorder 上报 Micrometer 指标,ai.chat.requests / tokens.* 四个 counter
     // 由 ConversationService 在 P3 已落的 usageRepo.save 之后调用 recordMetrics 触发。
     // nexus-forge-ai 是 library,不依赖 actuator;但需要 io.micrometer:micrometer-core 中的

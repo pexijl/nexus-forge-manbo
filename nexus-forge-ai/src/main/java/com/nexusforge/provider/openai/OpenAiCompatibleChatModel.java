@@ -12,7 +12,7 @@ import com.nexusforge.model.ChatModel;
 import com.nexusforge.stream.OpenAiStreamParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.reactive.JdkClientHttpConnector;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -67,6 +67,20 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
     protected final ObjectMapper json;
     protected final OpenAiJsonMapper mapper;
     protected final OpenAiStreamParser streamParser;
+    /**
+     * P2 流式用 WebClient + Reactor Netty 传输层。
+     *
+     * <p>之前用 {@link JdkClientHttpConnector} 包装 JDK HttpClient,但 JDK HttpClient
+     * 是阻塞型,在 {@code bodyToFlux} 路径上对 SSE 流响应有缓冲/吞帧问题——实测
+     * (MockWebServer 与生产 qwen DashScope 均如此):上游 HTTP 200 + 完整 SSE body
+     * 抵达后 {@code bodyToFlux(String.class)} 仍 emit 0 个元素,parseLines 一帧都拿不到,
+     * 客户端拿到 200 + 空 SSE 流。
+     *
+     * <p>换成 ReactorClientHttpConnector(HttpClient.create() 默认配置)后,Netty 的
+     * 背压式字节流正确把每个 chunk 推到下游,SSE 帧按到达顺序到达 parseLines。
+     * 同步 {@link #call(ChatRequest)} 路径仍用 JDK HttpClient(单次 send + 阻塞读
+     * 完整 body,与 SSE 无关),不需要换。
+     */
     protected final WebClient webClient;
 
     /**
@@ -126,10 +140,13 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
         this.mapper = mapper;
         this.streamParser = streamParser;
 
-        // JdkClientHttpConnector 把 JDK HttpClient 包成 ClientHttpConnector,
-        // 走 reactor 但底层仍是 java.net.http.HttpClient,readTimeout 是单响应时长
-        JdkClientHttpConnector connector = new JdkClientHttpConnector(this.http);
-        connector.setReadTimeout(props.getRequestTimeout());
+        // P2 流式:用 Reactor Netty HTTP 客户端作传输层。ReactorClientHttpConnector 是
+        // WebClient 的原生搭档,字节流按背压推到下游,SSE 帧不丢;JdkClientHttpConnector
+        // 包装阻塞型 JDK HttpClient,对流式响应有吞帧问题(详见类注释)。
+        // responseTimeout 等价于 props.requestTimeout:超过该时长没收到任何数据触发
+        // TimeoutException,与上游 .timeout() 配合形成"全链路超时"。
+        ReactorClientHttpConnector connector = new ReactorClientHttpConnector(
+                reactor.netty.http.client.HttpClient.create().responseTimeout(props.getRequestTimeout()));
         this.webClient = WebClient.builder()
                 .clientConnector(connector)
                 .build();
@@ -191,9 +208,16 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
 
     /**
      * 流式入口。用 {@link WebClient} 调 {@code /chat/completions} with {@code stream=true},
-     * 通过 {@link OpenAiStreamParser#parseLines(Flux)} 把上游 SSE 帧切成 {@link ChatChunk} 流。
+     * 通过 {@link OpenAiStreamParser#parseEvents(Flux)} 把 Spring {@code SseEventDecoder}
+     * 解码后的事件 payload 转成 {@link ChatChunk} 流。
      *
-     * <p>取消语义:下游订阅 dispose → JDK HttpClient 响应体 close → Reactor 关闭连接。
+     * <p>Spring 默认 codec 链在 {@code accept=text/event-stream} 时选中
+     * {@code SseEventDecoder},自动按 {@code data:} 行 + {@code \n\n} 分隔切事件;
+     * 下游拿到的每个元素就是单条 {@code data:} 的 JSON 字符串(已剥前缀/分隔符),
+     * 直接走 {@link OpenAiStreamParser#parseEvents(Flux)}。原 {@code parseLines}
+     * 用于 {@code text/plain} 路径(原始 SSE wire 格式),保留作为 fallback。
+     *
+     * <p>取消语义:下游订阅 dispose → Reactor 关闭 Netty 连接。
      * 错误语义:HTTP 4xx/5xx 抛 {@link LlmException};超时(TimeoutException)映射到
      * {@code LLM_UPSTREAM_TIMEOUT};网络断开映射到 {@code LLM_PROVIDER_ERROR}。
      */
@@ -219,7 +243,7 @@ public abstract class OpenAiCompatibleChatModel implements ChatModel {
                                         LlmErrorMapper.fromHttp(code, errBody, props.getRequestTimeout())));
                     }
                     return resp.bodyToFlux(String.class)
-                            .transform(streamParser::parseLines);
+                            .transform(streamParser::parseEvents);
                 })
                 .timeout(props.getRequestTimeout())
                 .onErrorMap(err -> mapStreamError(err, props.getRequestTimeout()));

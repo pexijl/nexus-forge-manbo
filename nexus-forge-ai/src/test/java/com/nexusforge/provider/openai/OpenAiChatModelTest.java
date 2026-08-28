@@ -357,6 +357,35 @@ class OpenAiChatModelTest {
                     .doOnNext(chunks::add)
                     .blockLast(java.time.Duration.ofSeconds(5));
             if (err[0] != null) throw new AssertionError("stream errored", err[0]);
+            // 关键回归断言:之前只有 blockLast 不报错就 pass,等于没测。
+            // 现在锁住"标准 \n\n 分隔的 SSE 帧必须全部解析出来"这个契约。
+            assertThat(chunks).hasSize(2);
+            assertThat(chunks.get(0).getDeltaContent()).isEqualTo("hello ");
+            assertThat(chunks.get(1).getDeltaContent()).isEqualTo("world");
+        }
+
+        @Test
+        @DisplayName("上游最后一段 chunk 无 \\n\\n 终止符(防御性 flush):残留 buffer 仍解析为最后一个 chunk")
+        void stream_flushes_trailing_buffer_without_terminator() throws Exception {
+            // qwen DashScope 等 OpenAI-compatible 实现的 SSE 流式响应实测在最后一段 chunk
+            // 仅发送 data: 行后直接关闭连接,不补 \n\n。parseLines 必须在 onComplete 时把
+            // 残留 buffer 当作最终事件解析,否则会 0 帧 → 客户端拿到空 SSE 流。
+            server.enqueue(new MockResponse.Builder()
+                    .status("HTTP/1.1 200 OK")
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body("data: {\"id\":\"x\",\"model\":\"qwen\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+                        + "data: {\"id\":\"x\",\"model\":\"qwen\",\"choices\":[{\"delta\":{\"content\":\"ho\"}}]}")
+                    .build());
+            java.util.List<ChatChunk> chunks = new java.util.ArrayList<>();
+            Throwable[] err = {null};
+            model.stream(sampleRequest("hi"))
+                    .doOnError(e -> err[0] = e)
+                    .doOnNext(chunks::add)
+                    .blockLast(java.time.Duration.ofSeconds(5));
+            if (err[0] != null) throw new AssertionError("stream errored", err[0]);
+            assertThat(chunks).hasSize(2);
+            assertThat(chunks.get(0).getDeltaContent()).isEqualTo("hi");
+            assertThat(chunks.get(1).getDeltaContent()).isEqualTo("ho");
         }
     }
 }
