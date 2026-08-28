@@ -36,7 +36,19 @@ public enum ResultCode {
     RATE_LIMITED(2009, "请求过于频繁，请稍后再试"),
     AVATAR_UPLOAD_FAILED(2010, "头像上传失败"),
     OLD_PASSWORD_INCORRECT(2011, "旧密码不正确"),
-    NEW_PASSWORD_SAME_AS_OLD(2012, "新密码不能与旧密码相同");
+    NEW_PASSWORD_SAME_AS_OLD(2012, "新密码不能与旧密码相同"),
+
+    // AI 网关
+    LLM_CONFIG_MISSING(3001, "LLM 配置缺失"),
+    LLM_MODEL_NOT_FOUND(3002, "模型不存在或未启用"),
+    LLM_INVALID_REQUEST(3003, "LLM 请求参数无效"),
+    LLM_PROVIDER_ERROR(3004, "LLM 服务商返回错误"),
+    LLM_UPSTREAM_TIMEOUT(3005, "LLM 上游响应超时"),
+    LLM_RATE_LIMITED(3006, "LLM 请求被速率限制"),
+    LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽"),
+    LLM_ALL_VENDORS_FAILED(3008, "所有降级链均失败"),
+    LLM_CIRCUIT_OPEN(3009, "降级链已熔断,暂不可用"),
+    LLM_GLOBAL_DEFAULT_NOT_CONFIGURED(3010, "全局 AI 模型未配置:管理员必须先调用 /api/admin/ai/global-default");
 
     private final Integer code;
     private final String message;
@@ -44,5 +56,17 @@ public enum ResultCode {
     ResultCode(Integer code, String message) {
         this.code = code;
         this.message = message;
+    }
+
+    /**
+     * 通过 Integer code 反查枚举项,找不到返回 {@link #INTERNAL_ERROR}。
+     * 用于 {@link com.nexusforge.exception.BaseException#getCode()} 拿到的 Integer 后做枚举映射。
+     */
+    public static ResultCode fromCodeValue(Integer code) {
+        if (code == null) return INTERNAL_ERROR;
+        for (ResultCode c : values()) {
+            if (c.code.equals(code)) return c;
+        }
+        return INTERNAL_ERROR;
     }
 }

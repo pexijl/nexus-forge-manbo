@@ -136,6 +136,17 @@ public abstract class IntegrationTestBase {
         return restBuilder.baseUri("http://localhost:" + port).build();
     }
 
+    /**
+     * 不抛异常的 RestTemplate — exchange() 对所有 HTTP 状态码返回 ResponseEntity,
+     * 不论 4xx / 5xx。用于需要断言 429 / 5xx 响应体的 IT。
+     */
+    protected RestTemplate restNoErrorHandling() {
+        return restBuilder
+                .baseUri("http://localhost:" + port)
+                .errorHandler(new org.springframework.web.client.NoOpResponseErrorHandler())
+                .build();
+    }
+
     /** 子类要拿 RustFS 容器地址时用这个,避免硬编码 */
     protected static String rustfsEndpoint() {
         return "http://" + RUSTFS.getHost() + ":" + RUSTFS.getMappedPort(9000);

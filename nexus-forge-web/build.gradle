@@ -20,6 +20,7 @@ dependencies {
     implementation project(':nexus-forge-user')
     implementation project(':nexus-forge-auth')
     implementation project(':nexus-forge-file')
+    implementation project(':nexus-forge-ai')
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -47,4 +48,11 @@ tasks.named('test') {
             excludeTags 'integration'
         }
     }
+}
+
+// P7 修复:把 bootRun 工作目录固定到仓库根,让 `optional:file:.env[.properties]`
+// 能从仓库根读到 .env(而不是从 nexus-forge-web/ 子目录找)。否则 JWT_SECRET 等
+// 环境变量会被解析为空,导致 JwtUtil.init 抛 WeakKeyException。
+bootRun {
+    workingDir = rootProject.projectDir
 }

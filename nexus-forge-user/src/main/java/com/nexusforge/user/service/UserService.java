@@ -82,6 +82,10 @@ public class UserService {
         if (dto.getPhone() != null) {
             user.setPhone(dto.getPhone());
         }
+        // P5 Step 6: 单用户配额覆盖(null 不更新,空字符串清除)
+        if (dto.getPlanQuotaOverride() != null) {
+            user.setPlanQuotaOverride(dto.getPlanQuotaOverride().isBlank() ? null : dto.getPlanQuotaOverride().trim());
+        }
         userRepository.save(user);
         userRoleProvider.evict(userId); // 角色可能变了，清缓存
         return toVoWithFreshUrl(user);

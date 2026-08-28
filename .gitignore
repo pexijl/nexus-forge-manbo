@@ -44,4 +44,20 @@ docker/MinIO/minio.license
 !.env.example
 **/application-local.yaml
 **/application-secret.yaml
-/WATCHDOG.yml
+# Local planning doc for LLM gateway (kept untracked on purpose)
+docs/
+/.mcp.json
+
+# Reasonix agent 缓存(本地思考轨迹 + Reasonix skill store)
+/.reasonix/
+
+# bootRun 启动日志(每次重启会重写,留在仓库里会无限膨胀)
+**/bootrun.log
+**/bootrun.log.err
+
+# 一次性本地调试脚本 / SQL / Python 文件 —— 解决 dev 期改密码 / 验 SQL 的临时痕迹
+# 不入库;以后再写新的 fix-*.sql 也会被自动忽略
+/fix-*.sql
+/reset-*.sql
+/gen-hash.py
+/test_bcrypt.py

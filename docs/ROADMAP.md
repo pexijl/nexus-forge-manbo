@@ -46,7 +46,7 @@
 
 ### 🔥 本轮待办(07-07 ~)
 
-- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
+- [x] 后端:`JwtAuthenticationFilter` 已从 Redis 读权限(`PermissionLoader → UserRoleProvider → Redis`,TTL 5min,evict 链路就绪);后续清理:AuthService 不再把 roles 写进 token(避免 Token 膨胀),`JwtUtil#createToken` javadoc 同步更新;filter 全程只读 username 自 token,角色全部经 Redis;compile + 单元测试(25 个 user + web 集成)通过
 - [ ] 集成测试:auth + user + file 端到端
 - [ ] GitHub Actions CI(lint + test + build)
 
@@ -110,7 +110,7 @@
 - [x] Docker Compose 启动 MinIO(API `:9000` + Console `:9001`)
 - [x] `S3StorageProvider` 实现(基于 `software.amazon.awssdk:s3`,兼容 MinIO / RustFS / 阿里云 / 腾讯)
 - [x] `application-dev.yaml` 完整配置示例
-- [x] `StorageProvider#createBucket` 已实现(`S3StorageProvider.createBucket`),但**尚未**接入启动钩子 —— 首次部署需手动在 Console Web UI 创建或后端补一个 `ApplicationRunner`
+- [x] `StorageProvider#createBucket` 已实现(`S3StorageProvider.createBucket`)并接入启动钩子 `StorageInitializer`(`nexus-forge-file/.../bootstrap/StorageInitializer`,`ApplicationRunner`);`@ConditionalOnProperty(storage.auto-create-bucket, matchIfMissing=true)` 默认开启;`application.yaml` 同步新增 `storage.auto-create-bucket: true`;已存在 / 多实例 race(`BucketAlreadyOwnedByYouException` / `BucketAlreadyExistsException`)/ `SdkException` 三层兜底,失败不阻塞启动
 - [ ] Console Web UI 调试入口文档(目前仅 `docker/RustFS/README.md` 提到,主 README 未汇总)
 
 ### 测试环境(S3 兼容)

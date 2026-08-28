@@ -4,6 +4,10 @@
 # (覆盖 StorageProperties 的 vendor 默认值 "rustfs",并提供 minio.default.* 配置)
 
 spring:
+  ai:
+    providers:
+      openai:
+        api-key: test-dummy-key  # 避免 OpenAiChatModel 构造期抛异常;AI IT 用 MockChatModel 覆盖
   jpa:
     hibernate:
       ddl-auto: create-drop # 每次启动时都重新创建数据库
@@ -17,3 +21,9 @@ jwt:
   enable-blacklist: true # 是否启用黑名单
   blacklist-prefix: 'auth:blacklist:test:' # 黑名单前缀
   refresh-prefix: 'auth:refresh:test:' # 刷新令牌前缀
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

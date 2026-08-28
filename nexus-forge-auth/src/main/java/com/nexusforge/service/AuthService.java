@@ -40,11 +40,13 @@ public class AuthService {
 
     /**
      * 登录成功 —— 返回 access + refresh
+     *
+     * <p>Token 仅承载 sub(用户ID)/typ/jti/username/iat/exp；角色由
+     * {@link com.nexusforge.security.PermissionLoader} 每次请求从 Redis 读取，
+     * 不放在 token 中以避免 Token 膨胀及刷新前拿不到最新角色的问题。</p>
      */
     public TokenBundle issueTokens(LoginUser user) {
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("username", user.getUsername());
-        claims.put("roles", user.getRoles());
+        Map<String, Object> claims = buildClaims(user);
 
         TokenPair access = jwtUtil.createToken(String.valueOf(user.getUserId()), claims, TokenType.ACCESS);
         TokenPair refresh = jwtUtil.createToken(String.valueOf(user.getUserId()), claims, TokenType.REFRESH);
@@ -85,8 +87,10 @@ public class AuthService {
         // 重新读取用户信息（角色变更后能立即生效）
         LoginUser user = userLoader.loadById(userId);
 
-        TokenPair access = jwtUtil.createToken(String.valueOf(userId), toClaims(user), TokenType.ACCESS);
-        TokenPair refresh = jwtUtil.createToken(String.valueOf(userId), toClaims(user), TokenType.REFRESH);
+        Map<String, Object> claimsMap = buildClaims(user);
+
+        TokenPair access = jwtUtil.createToken(String.valueOf(userId), claimsMap, TokenType.ACCESS);
+        TokenPair refresh = jwtUtil.createToken(String.valueOf(userId), claimsMap, TokenType.REFRESH);
         storeRefreshVersion(userId, refresh.jti(), refresh.expiresAt());
 
         return new TokenBundle(access, refresh);
@@ -136,10 +140,16 @@ public class AuthService {
         );
     }
 
-    private Map<String, Object> toClaims(LoginUser user) {
+    /**
+     * 构造写入 JWT payload 的业务 claims。
+     *
+     * <p>这里只放"轻量、不易变"的展示性字段（如 username）。角色经
+     * {@link com.nexusforge.security.PermissionLoader} 从 Redis 实时拉取，
+     * 既能立即反映角色变更，也避免 Token 膨胀。</p>
+     */
+    private Map<String, Object> buildClaims(LoginUser user) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("username", user.getUsername());
-        claims.put("roles", user.getRoles());
         return claims;
     }
 
