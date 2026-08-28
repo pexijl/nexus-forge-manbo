@@ -1,0 +1,29 @@
+# 测试环境配置
+#
+# 注意:不写 storage.* 段,完全由 IntegrationTestBase 的 @DynamicPropertySource 注入
+# (覆盖 StorageProperties 的 vendor 默认值 "rustfs",并提供 minio.default.* 配置)
+
+spring:
+  ai:
+    providers:
+      openai:
+        api-key: test-dummy-key  # 避免 OpenAiChatModel 构造期抛异常;AI IT 用 MockChatModel 覆盖
+  jpa:
+    hibernate:
+      ddl-auto: create-drop # 每次启动时都重新创建数据库
+
+jwt:
+  secret: ${TEST_JWT_SECRET:dGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQ=} # 测试环境的 JWT 密钥
+  access-ttl: 900000 # 15分钟
+  refresh-ttl: 604800000 # 7天
+  header: Authorization # 请求头名称
+  prefix: Bearer # JWT 的前缀
+  enable-blacklist: true # 是否启用黑名单
+  blacklist-prefix: 'auth:blacklist:test:' # 黑名单前缀
+  refresh-prefix: 'auth:refresh:test:' # 刷新令牌前缀
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

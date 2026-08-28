@@ -15,6 +15,16 @@ dependencies {
     implementation 'org.springframework.security:spring-security-core'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
 
+    // Flyway — 数据库迁移权威源。本模块持有 db/migration/ SQL 资源。
+    // Spring Boot 4.1 已移除 Flyway 自动装配模块(module/spring-boot-flyway 不再存在),
+    // Flyway 12 也未提供 Spring Boot starter。本模块自写 FlywayMigrationRunner 集成。
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // 手写 Flyway 集成需要 DataSource:依赖 starter-jdbc 让 Spring Boot 自动配 HikariCP + DataSource。
+    // 不引入 JPA(那会让 ddl-auto 复活),只拿 DataSource 即可。
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+
     // 单元测试：JUnit 5 + Mockito + AssertJ + Spring Test 一次拿齐
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     // Security 测试工具：用于在单元测试里直接 new BCryptPasswordEncoder

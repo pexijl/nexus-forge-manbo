@@ -24,4 +24,8 @@ public class UpdateUserDto {
     @Schema(description = "新手机号（中国大陆 11 位）", example = "13800000000")
     @Pattern(regexp = "^1[3-9]\\d{9}$", message = "手机号格式不正确")
     private String phone;
+
+    @Schema(description = "单用户配额覆盖(JSON 格式),管理员专用。例: {\"dailyTokenLimit\":1000000,\"requestLimit\":500}。传 null 不更新,传空字符串清除覆盖",
+            example = "{\"dailyTokenLimit\":1000000,\"requestLimit\":500}")
+    private String planQuotaOverride;
 }

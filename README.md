@@ -2,7 +2,7 @@
 
 一个基于 **Java 26 + Spring Boot 4** 与 **Vue 3** 的全栈应用骨架,按业务能力拆分为 Gradle 多模块项目。
 
-> 当前进度: `auth` / `user` / `file` / `core` 四个后端模块均已实现; `core` 提供了限流、幂等、请求日志等基础设施; 前端已补齐布局骨架与个人中心页; 接入 Swagger UI 在线文档; `user` 模块已有单元测试覆盖; 认证侧已落地 Token 双轨制(access + refresh)与 Redis 黑名单精确吊销; Docker 编排覆盖 PostgreSQL / Redis / 对象存储(MinIO + RustFS)四栈。
+> 当前进度: `auth` / `user` / `file` / `core` / `ai` 五个后端模块均已实现; `core` 提供了限流、幂等、请求日志等基础设施; 前端已补齐布局骨架与个人中心页; 接入 Swagger UI 在线文档; `user` 模块已有单元测试覆盖; 认证侧已落地 Token 双轨制(access + refresh)与 Redis 黑名单精确吊销; Docker 编排覆盖 PostgreSQL / Redis / 对象存储(MinIO + RustFS)四栈; **AI 网关已落地 P1–P5(同步 / 流式 / 工具调用 / 偏好解析 / 限流 / 配额 / 用量埋点),`nexus-forge-ai` 不再是 stub**。
 
 ---
 
@@ -26,7 +26,7 @@
 
 | 类别 | 技术 |
 |------|------|
-| 框架 | Vue 3.5、Vite 7、Vue Router 4 |
+| 框架 | Vue 3.5、Vite 8、Vue Router 4 |
 | UI | PrimeVue 5 + PrimeVue Forms、PrimeUIX Themes、Tailwind CSS 4 |
 | 状态管理 | Pinia 3 + `pinia-plugin-persistedstate`(AES 加密持久化) |
 | 网络 | Axios(请求取消、401/403 拦截、413 处理) |
@@ -45,7 +45,7 @@ nexus-forge/
 ├── nexus-forge-auth/         # 认证:Spring Security + JWT(登录 / 注册 / 鉴权)
 ├── nexus-forge-user/         # 用户:实体、注册、资料修改、头像、密码变更(含单元测试)
 ├── nexus-forge-file/         # 文件:对象存储抽象,支持 MinIO / RustFS / 阿里云 OSS / 腾讯云 COS(均走 S3 协议)
-├── nexus-forge-ai/           # AI 能力(规划中)
+├── nexus-forge-ai/           # AI 网关:ChatModel SPI(OpenAI / OpenAI 兼容基类 / Qwen / DeepSeek / Ollama / Anthropic 全部为完整实现)、LlmClient、对话、限流、配额、用量、个性化偏好、私 Key(详见"AI 网关"章节);Spring Boot 4 `@AutoConfiguration` 通过 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 挂载
 ├── nexus-forge-visual/       # 可视化(规划中)
 └── nexus-forge-ui/           # 前端(Vue 3)
 ```
@@ -57,7 +57,7 @@ web ─┬─► auth ─┬─► common
      ├─► user ─┘
      ├─► core ► common
      ├─► file ► common
-     ├─► ai   ► common
+     ├─► ai   ─► core, common
      └─► visual ► common
 ```
 
@@ -84,7 +84,7 @@ nexus-forge-auth/src/main/java/com/nexusforge/
 
 ```
 nexus-forge-core/src/main/java/com/nexusforge/
-├── NexusForgeCoreAutoConfiguration.java   # spring.factories 自动装配
+├── (无 auto-config)                      # `RequestIdFilter` / `@Idempotent` / `@RateLimit` / `GlobalExceptionHandler` 等 `@Component` / `@Aspect` 类在 `com.nexusforge.{log,idempotent,ratelimit,error}` 下,由 `nexus-forge-web` 的 `@SpringBootApplication` 默认扫描 `com.nexusforge.*` 负责注册。早期有个 `NexusForgeCoreAutoConfiguration.java`,但 Spring Boot 4 已删除 `spring.factories` 机制,而模块缺 `META-INF/spring/...AutoConfiguration.imports` 资源文件,所以该 auto-config 实际从未被加载,已删除
 ├── error/          # GlobalExceptionHandler(统一异常处理)
 ├── log/            # 请求 ID + MDC 链路追踪 + WebLog AOP
 ├── idempotent/     # @Idempotent 注解 + Redis SET NX EX
@@ -98,11 +98,11 @@ src/
 ├── api/             # 后端接口封装(auth.ts / user.ts)
 ├── stores/          # Pinia 状态(auth / layout)
 ├── router/          # 路由配置(含按 Role 权限守卫)
-├── types/           # TS 类型(api.d.ts / models/)
+├── types/           # TS 类型:`api.ts`(Axios 响应包装)、`auth.ts`(TokenBundle/TokenSlot/LoginRequest/RegisterRequest)、`models/user.ts`(UserInfo/UpdateUserInfo)、`router.d.ts`(Vue Router 模块声明)、`vite-env.d.ts`(import.meta.env 类型)
 ├── views/           # 页面(按业务模块划分子目录)
 ├── layout/          # 应用布局(AppLayout / AppToolbar / AppSidePanel)
 ├── components/      # 通用组件(AvatarUploader / ParticleCanvas)
-├── composables/     # 组合式函数(useDateFormat)
+├── composables/     # 组合式函数:`useAuthBoot.ts`(`main.ts` 调用 `bootstrapAuth().finally(mount)` 的实现,负责 token 刷新预检 + auth store 初始化)、`useDateFormat.ts`(日期格式化工具)
 ├── themes/          # PrimeVue 主题定制(颜色 / 组件 / 语义)
 ├── styles/          # SCSS 设计令牌(基础 / 工具 / 主题)
 └── utils/           # 工具函数(http / error)
@@ -192,6 +192,11 @@ npm run dev
 | `RUSTFS_*` | RustFS 连接参数(endpoint / region / access-key / secret-key / bucket / path-style) | dev 默认 `rustfsadmin/rustfsadmin` 仅供本地 |
 | `MINIO_*` | MinIO 连接参数 | dev 默认 `minioadmin/minioadmin` 仅供本地 |
 | `ALIYUN_*` / `TENCENT_*` | 阿里云 OSS / 腾讯云 COS | 留空,按需填写 |
+| `SPRING_AI_ENABLED` | 总开关,`false` 时 AI 模块所有 Bean 不注册 | `true` |
+| `SPRING_AI_PREFERENCE_MASTER_KEY` | 用户私 Key(AES-256-GCM)加密主密钥,base64,推荐 ≥32 字节 | **无,留空时降级用 `JWT_SECRET` 派生**(dev OK,**生产建议显式配置独立密钥**) |
+| `SPRING_AI_DEFAULT_VENDOR` | 默认 vendor | `qwen` |
+| `SPRING_AI_QWEN_DEFAULT_MODEL` | `qwen` vendor 注册期兜底 default-model(运行期被 `ai_global_default` 表覆盖) | `qwen-turbo` |
+| `DASHSCOPE_API_KEY` | 阿里云百炼(DashScope OpenAI 兼容)系统 Key | dev 留空 |
 
 ### 生产环境
 
@@ -207,7 +212,7 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 
 - 怀疑 JWT 泄露 → 重生成 `JWT_SECRET`,所有用户 token 立即失效,需重新登录
 - 怀疑数据库泄露 → 立即重置 `DB_PASSWORD`,并在 `application-*.yaml` 中检查是否有样例残留
-- 历史清理:仓库早期 commit 含有示例凭据(`VasyaManbo`),**视同已泄露**,必须轮换密码并视情况 `git filter-repo`
+- 历史清理:仓库早期 commit 含有示例凭据(`VasyaMambo`,git author 邮箱 `pexijl@foxmail.com`),**视同已泄露**,必须轮换密码并视情况 `git filter-repo`
 
 ### `.gitignore` 规则
 
@@ -277,8 +282,40 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 - `Role` — `USER` / `ADMIN`,内置 Spring Security `authority`
 - `UserStatus` — 用户状态枚举
 - `BaseEntity` — 实体基类(`createdAt` / `updatedAt`)
-- 异常体系:`BaseException` → `BusinessException` / `AuthException`,由 `GlobalExceptionHandler` 统一处理
+- 异常体系:`BaseException` → `BusinessException` / `AuthException` / `LlmException`(AI 网关专用),由 `GlobalExceptionHandler` 统一处理
+- AI 网关错误码同处 `ResultCode`(`LLM_CONFIG_MISSING` / `LLM_MODEL_NOT_FOUND` / `LLM_PROVIDER_ERROR` / `LLM_UPSTREAM_TIMEOUT` / `LLM_RATE_LIMITED` / `LLM_QUOTA_EXCEEDED` / `LLM_ALL_VENDORS_FAILED` / `LLM_CIRCUIT_OPEN` / `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED`)
 - 文件 DTO: `FileClient` / `FileMeta` / `FileBizType` / `FileAccess` / `UploadCredential`
+
+### AI 网关(`nexus-forge-ai`)
+
+- **`ChatModel` SPI** + 6 vendor:`OpenAiChatModel`(OpenAI 官方) + `OpenAiCompatibleChatModel` 基类(子类:`QwenChatModel` DashScope OpenAI 兼容 / `DeepSeekChatModel` / `OllamaChatModel`) + `AnthropicChatModel`(**完整实现**,独立协议,位于 `provider/anthropic/`,含 `AnthropicJsonMapper` 请求映射 + `AnthropicMessagesStreamParser` SSE 解析)。**所有 OpenAI 兼容厂商放在 `provider/openai/` 一个目录**(按协议家族分组,不是按 vendor),非 OpenAI 协议单独建子目录
+- **`LlmClient` 门面**:`call(req)` / `call(req, vendor, model)` / `stream(req)` / `stream(req, vendor, model)` / `callWithToolLoop(...)`(工具调用闭环,见下)。系统模式走 `ChatModelRouter` 降级链 + 熔断;私 Key 模式绕过降级链、quota、IP 限流
+- **`PreferenceResolver` 三态分流**:`SYSTEM`(全局默认 + 系统 Key) / `USER_OVERRIDE_SYSTEM_KEY`(用户设了 vendor/model 仍用系统 Key) / `USER_PRIVATE_KEY`(用户填私 Key)。优先级链路:请求 model → 用户偏好 → 全局默认 → yaml
+- **`VendorChatModelFactory`**:按 `sha256(apiKey)` 缓存动态构造的 ChatModel,避免重复创建,内部用 `static final` 子类规避 inner-class 限制
+- **`ConversationService`**:`sendMessage` 持久化 user+assistant,首条 user 自动更新对话标题与 model,记录工具调用,落 `ai_message_usage` 用量
+- **Tool Calling / Function Calling 闭环**(P4 Step 12):`ToolRegistry` 注册 `ToolDefinition` 列表,`LlmClient.callWithToolLoop` 检测到 `tool_calls` 后调用工具、把工具结果作为 `role=tool` 消息重入 LLM、直到 LLM 返回 `finish_reason != tool_calls` 或达到最大轮次;`EchoTool` 是默认示例工具;`ToolExecutor` 处理工具调用的异常隔离与超时;`FunctionCallAggregator` 在流式路径上按 `index` 聚合 `delta.tool_calls` 片段,SSE 终止帧一次性吐出完整 `toolCalls[]`
+- **`RateLimitGuard`**(Caffeine 本地 Token Bucket,user + IP 维度,私 Key 跳 IP;键前缀 `ai:rl:`,与 `core/RateLimitAspect` 的 `rl:` 命名空间隔离)
+- **`QuotaService`**:24h 滑窗 token / request 计数,支持 per-user override,私 Key 跳过平台 quota
+- **`UsageRecorder`** + Micrometer 埋点:`ai.llm.requests` / `ai.llm.tokens.{prompt,completion,total}` 计数器,按 vendor / model / source 维度拆 tag
+- **流式输出**:`AiStreamController` 用 `StreamingResponseBody`(避开 Spring 7 + Tomcat 11 的 chunked transfer encoding EOF 问题;**不要**用 `SseEmitter`)。`writeChunks` 用单次 `Flux.subscribe` + `CountDownLatch.await` 防止 cold-Flux 双重订阅(否则会发 2 次 LLM HTTP 请求)。SSE wire 格式是 flat camelCase `ChatChunk` JSON 帧(`data: <json>\n\n`),**不是** OpenAI `chat.completion.chunk`(无 `choices[]`、无 `data: [DONE]`、无 `object`/`created`/`model` 字段);错误帧 `{"error": "..."}`;流结束靠 socket 关闭
+- **REST 接口**:
+  - `POST /api/ai/chat`(同步)
+  - `POST /api/ai/chat/stream`(SSE,**注意是 `/chat/stream`,不是 `/stream`**)
+  - `POST /api/ai/conversations`(创建) / `GET /api/ai/conversations`(列表) / `GET /api/ai/conversations/{id}`(对话详情 VO `ConversationDetailVo`,**消息列表在该 VO 内**,没有单独的 `GET /{id}/messages`) / `POST /api/ai/conversations/{id}/messages`(发送消息,触发 LLM 调用) / `DELETE /api/ai/conversations/{id}`
+  - `GET /api/ai/preference` / `PUT /api/ai/preference` / `DELETE /api/ai/preference`(用户偏好;vendor/model 可选 + 私 Key 明文加密入库)
+  - `GET /api/admin/ai/global-default` / `PUT /api/admin/ai/global-default`(`@PreAuthorize("hasRole('ADMIN')")`)
+  - `GET /api/ai/usage`(24h 用量摘要,`AiUsageController`)
+- **首次启动行为**:`ai_global_default.model` 种子为 `'__UNSET__'`(sentinel),所有 system-mode 请求返回 `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED (3010)`,直到 admin 调 `PUT /api/admin/ai/global-default` 设置真值
+
+### AI 数据库迁移(`nexus-forge-user` Flyway)
+
+Spring Boot 4.1 已移除 `spring-boot-flyway` 自动装配;`FlywayMigrationRunner`(`@Component` + `@PostConstruct`)替代,在 JPA 启动前跑迁移,读 `spring.flyway.{enabled, locations, baseline-on-migrate, validate-on-migrate}`。校验失败(checksum mismatch)自动 `flyway.repair()` 后重跑。
+
+AI 相关表(在 `nexus-forge-user/src/main/resources/db/migration/`):
+
+- `V20260801_001__add_ai_global_default.sql` — `ai_global_default` 单行表(`id=1 CHECK (id=1)`,`model='__UNSET__'` 种子)
+- `V20260801_002__add_user_ai_preference.sql` — `user_ai_preference` per-user 表,`encrypted_api_key BYTEA`(AES-256-GCM 密文)+ `api_key_fingerprint VARCHAR(16)`(明文 Key 指纹展示)
+- 老 SQL 加 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` / `DO $$ ... $$` 包装,容忍 JPA `ddl-auto=update` 已经建过表的现状
 
 ### 前端
 
@@ -315,16 +352,17 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 ## 待开发
 
 
-- [ ] `nexus-forge-ai`:LLM 调用网关、流式响应、向量检索 / RAG
+- [x] `nexus-forge-ai`:LLM 调用网关、流式响应 — 见"AI 网关"章节
+- [ ] `nexus-forge-ai`:向量检索 / RAG(Function Calling 已落地,工具执行 + 重入 LLM 在 Step 12+ 跟进)
 - [ ] `nexus-forge-visual`:图表 / 看板 / 大屏组件
 - [x] 后端:Token 刷新(`POST /auth/refresh`)、登出黑名单 — `6e43be9`
 - [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
 - [ ] 后端:密码重置(邮箱验证码)、第三方登录
 - [ ] 前端:业务首页(`/home`)真实数据、权限路由(基于 Role)
 - [ ] 前端:i18n 国际化(中文 / 英文)
-- [ ] 集成测试:auth + user + file 端到端
+- [x] 集成测试:auth + user + file + ai 端到端 — 13 个 IT 文件已落地于 `nexus-forge-web/src/test/java/com/nexusforge/flows/`(`AuthRegisterLoginIT` / `AuthRefreshIT` / `UserProfileIT` / `FileUploadIT` / `AiChatIT` / `AiStreamIT` / `AiQuotaIT` / `AiRateLimitIT` / `FallbackIT` / `ConversationIT` / `UsageEndpointIT` / `ApplicationMetricsIT` / `HealthIT`)
 - [x] Docker Compose 一键起 PostgreSQL / Redis — `e35aa5a` / `1c7721c`(对象存储:`docker/MinIO`、`docker/RustFS`)
-- [ ] GitHub Actions CI(lint + test + build)
+- [x] GitHub Actions CI — `.github/workflows/ci.yml` 后端 `./gradlew --no-daemon clean build` + 前端 `npm install --no-audit --no-fund && npm run lint && npm run build`(lint `continue-on-error: true`,待现有错误清零后再移除)
 
 ---
 

@@ -87,7 +87,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'   # 22.13+ 满足 Vite 7 的 engines 要求
+          node-version: '22'   # 22.13+ 满足 Vite 8 的 engines 要求
           cache: 'npm'
           cache-dependency-path: nexus-forge-ui/package-lock.json
 

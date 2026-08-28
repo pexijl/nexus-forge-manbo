@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
+@org.springframework.core.annotation.Order(100)
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 

@@ -18,6 +18,31 @@ spring:
       max-file-size: 5MB          # 单文件上限（头像 5MB 够用）
       max-request-size: 10MB      # 整个请求上限
       file-size-threshold: 2MB    # 超过此值写入磁盘，否则内存
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+  ai:
+    preference:
+      master-key: ${SPRING_AI_PREFERENCE_MASTER_KEY:}  # 不配则降级用 jwt.secret(生产建议显式配独立密钥)
+
+
+
+server:
+  tomcat:
+    # 允许 Tomcat 吞掉被 multipart 限制拒绝后的剩余请求体，避免客户端看到连接重置而拿不到 413 JSON。
+    max-swallow-size: 20MB
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
 
 springdoc:
   swagger-ui:
@@ -53,6 +78,7 @@ logging:
 
 storage:
   vendor: ${STORAGE_VENDOR:rustfs} # 存储服务提供商，支持 minio、rustfs、aliyun、tencent、aws；其中 minio/rustfs/aliyun/tencent 均为 S3 兼容协议,字段语义相同
+  auto-create-bucket: true   # 默认 true
 
   rustfs:
     default:

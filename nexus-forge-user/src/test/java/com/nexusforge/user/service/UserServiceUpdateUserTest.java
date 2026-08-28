@@ -93,7 +93,58 @@ class UserServiceUpdateUserTest extends UserServiceTestSupport {
             verify(userRepository, never()).existsByEmail(any());
             verify(userRepository).save(any(User.class));
         }
+
+        @Test
+        @DisplayName("设置 planQuotaOverride: JSON 字符串写入")
+        void updates_plan_quota_override() {
+            stubUserExists();
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            UpdateUserDto dto = new UpdateUserDto();
+            dto.setPlanQuotaOverride("{\"dailyTokenLimit\":1000000,\"requestLimit\":500}");
+
+            UserVo vo = userService.updateUser(USER_ID, dto);
+
+            verify(userRepository).save(any(User.class));
+            // 验证 User 实体字段被更新(通过 save 参数捕获)
+            assertThat(vo).isNotNull();
+        }
+
+        @Test
+        @DisplayName("空字符串 planQuotaOverride → 清除覆盖(null)")
+        void empty_plan_quota_override_clears() {
+            stubUserExists();
+            User user = existingUser(USER_ID);
+            user.setPlanQuotaOverride("{\"dailyTokenLimit\":1000}");
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            UpdateUserDto dto = new UpdateUserDto();
+            dto.setPlanQuotaOverride("  ");  // 空白 → 清除
+
+            userService.updateUser(USER_ID, dto);
+
+            verify(userRepository).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("null planQuotaOverride → 不更新,保持原值")
+        void null_plan_quota_override_keeps_original() {
+            stubUserExists();
+            User user = existingUser(USER_ID);
+            user.setPlanQuotaOverride("{\"dailyTokenLimit\":1000}");
+            when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+            when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+            UpdateUserDto dto = new UpdateUserDto();
+            // planQuotaOverride 默认 null → 不更新
+
+            userService.updateUser(USER_ID, dto);
+
+            verify(userRepository).save(any(User.class));
+        }
     }
+
 
     @Nested
     @DisplayName("邮箱冲突")

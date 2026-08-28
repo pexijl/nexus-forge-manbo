@@ -1,21 +1,56 @@
 plugins {
-    id 'java'
+    id 'java-library'
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
 }
 
 group = 'com.nexusforge'
 version = '0.0.1-SNAPSHOT'
-description='AI模块'
+description = 'AI 模块'
 
-repositories {
-    mavenCentral()
-}
+// 不让本模块生成可执行的 bootJar,只做 library
+bootJar { enabled = false }
 
+// springdoc 与根 dependencyManagement 一致:3.0.3(根 build.gradle 已声明)
+// starter-web MVC,SSE/WebClient 用 spring-webflux 库(不带 WebFluxAutoConfiguration);
+// 共存于 MVC 容器不会冲突,Flux 已是 P1 ChatModel.stream 的返回类型,P2 把它用起来。
 dependencies {
-    testImplementation platform('org.junit:junit-bom:6.0.0')
+    api project(':nexus-forge-common')                  // 域模型、Result、UserPrincipal
+    implementation project(':nexus-forge-core')         // P5 Step 7: RateLimiter + RateLimitException
+    implementation 'org.springframework.boot:spring-boot-starter-web'      // MVC
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // @AuthenticationPrincipal 来自 spring-security-core;AI 模块的 controller 解析
+    // 通过 JwtAuthenticationFilter 写入 SecurityContextHolder 的 UserPrincipal。
+    implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
+    implementation 'io.projectreactor:reactor-core'
+    // P2 流式:WebClient API + Reactor Netty 客户端传输。spring-web 的
+    // ReactorClientHttpConnector 构造器签名是 (reactor.netty.http.client.HttpClient),
+    // 该类位于 reactor-netty-http(不是 reactor-netty-core)。两 jar 必须同版本,
+    // 由根 build.gradle dependencyManagement 的 reactorNettyVersion = '1.2.6' 统一管理。
+    implementation 'org.springframework:spring-webflux'
+    implementation 'io.projectreactor.netty:reactor-netty-core'
+    implementation 'io.projectreactor.netty:reactor-netty-http'
+    // P5 Step 4: UsageRecorder 上报 Micrometer 指标,ai.chat.requests / tokens.* 四个 counter
+    // 由 ConversationService 在 P3 已落的 usageRepo.save 之后调用 recordMetrics 触发。
+    // nexus-forge-ai 是 library,不依赖 actuator;但需要 io.micrometer:micrometer-core 中的
+    // MeterRegistry 接口(observation/commons 不含)。
+    implementation 'io.micrometer:micrometer-core'
     testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params'
+    testImplementation 'com.squareup.okhttp3:mockwebserver3-junit5:5.4.0'
+    // P4 Step 9: stream 降级集成测试用 StepVerifier 断言 Flux 输出
+    testImplementation 'io.projectreactor:reactor-test'
+    testImplementation 'org.assertj:assertj-core'
+    // P5 Step 1: @DataJpaTest + Testcontainers 跑真实 SQL 测聚合 JPQL。
+    // - starter-test 由根 build.gradle 子项目级统一引入,这里不重复;
+    // - testcontainers-bom 走 platform(...) 模式,与 nexus-forge-web 保持一致。
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    // P5 Step 2: 显式跑 JSR-303 校验(boot 4.1 ApplicationContextRunner
+    // 不装配 MethodValidationPostProcessor,直接用 jakarta.validation API)
+    testImplementation 'org.springframework.boot:spring-boot-starter-validation'
 }
 
-test {
-    useJUnitPlatform()
-}
+test { useJUnitPlatform() }

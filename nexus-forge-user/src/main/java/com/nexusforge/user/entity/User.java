@@ -58,6 +58,9 @@ public class User extends BaseEntity {
     @Enumerated(EnumType.STRING)
     private Set<Role> roles = EnumSet.of(Role.USER);
 
+    @Column(name = "plan_quota_override", columnDefinition = "TEXT")
+    private String planQuotaOverride;
+
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;
 }
