@@ -16,4 +16,11 @@ public class SendMessageDto {
      * 可选:覆盖对话的模型(切换模型)。为空则沿用对话创建时的模型。
      */
     private String model;
+
+    /**
+     * Phase 3 — 可选:用户显式选定的代理 ID(必须属于当前 user)。
+     * 优先级最高,比 {@link #model} 字段先解析。
+     * 走 {@code user_ai_proxy} 多代理机制,USER_PRIVATE_KEY 模式。
+     */
+    private Long proxyId;
 }

@@ -26,6 +26,77 @@ spring:
   ai:
     preference:
       master-key: ${SPRING_AI_PREFERENCE_MASTER_KEY:}  # 不配则降级用 jwt.secret(生产建议显式配独立密钥)
+    # OpenAI starter 直写 api-key — 所有 profile 共享的占位符兜底
+    # OpenAI 官方 Java SDK 启动期强制校验 credential source
+    # (apiKey / workloadIdentity / adminApiKey),空串 / 缺失抛 IllegalStateException。
+    # 这里直写保证 OpenAI starter 一定能装配 bean(供 DeepSeek 等 OpenAI 协议
+    # vendor 复用);真 key 通过 OPENAI_API_KEY env var 覆盖。
+    # 实际生效:其他 vendor(DeepSeek 等)的 providers.<v>.api-key 走
+    # ProviderPropertiesBridge 桥到 spring.ai.openai.api-key(addFirst 优先级
+    # 会覆盖此直写),所以此直写只在"无任何 provider enabled"的边界场景生效。
+    openai:
+      api-key: ${OPENAI_API_KEY:placeholder-replace-with-real-openai-key}
+    # 各 vendor 的统一配置(phase 5 起作为 single source of truth):
+    # 字段语义:
+    #   enabled       — 是否启用该 vendor(Router / LlmClient 路由时检查)
+    #   api-key       — 系统 Key 路径的 API key;私 Key 模式不走这个
+    #   base-url      — OpenAI 兼容协议家族用,Anthropic 不需要
+    #   default-model — 客户端没指定 model 时默认用这个
+    # ProviderPropertiesBridge(EnvironmentPostProcessor)自动把
+    # api-key / base-url / default-model 三个字段桥接到 spring.ai.{starter-ns}.*
+    # 命名空间,让 Spring AI 各 vendor starter 装配 ChatModel bean 时看到正确 key。
+    # 私 Key 模式(VendorChatModelFactory)直接读这里的 base-url / default-model 拼 URL。
+    # dev/prod profile 只 override deployment-specific 决策(enabled + api-key env var),
+    # 不应再单独配 spring.ai.openai.* / spring.ai.deepseek.* 等 starter namespace(双 namespace
+    # 配置会让 bridge 的 addFirst 优先级跟你的预期打架)。
+    providers:
+      # 国外官方(默认启用)
+      openai:
+        enabled: true
+        # 占位符兜底:OpenAI 官方 Java SDK 的 OpenAIClient 启动期强制校验
+        # 至少一个 credential source(apiKey / workloadIdentity / adminApiKey),
+        # 空串 / 缺失都会抛 IllegalStateException("At least one credential
+        # source must be specified")。DeepSeek 复用 openai starter 的 bean,
+        # 所以 dev 启 DeepSeek 也必须有非空 key 喂给 starter。
+        # 没设 env var → 注入占位符(非空,启动通过,真实调用会 401)
+        # 设了 env var → 注入真 key
+        api-key: ${OPENAI_API_KEY:placeholder-replace-with-real-openai-key}
+        base-url: https://api.openai.com/v1
+        default-model: gpt-4o-mini
+      deepseek:
+        enabled: true
+        # 同上 — DeepSeek 走 OpenAI 协议复用 openai starter,这条会被 bridge
+        # 桥到 spring.ai.openai.api-key,空串直接让 OpenAIClient 构造失败。
+        api-key: ${DEEPSEEK_API_KEY:placeholder-replace-with-real-deepseek-key}
+        base-url: https://api.deepseek.com
+        default-model: deepseek-v4-flash
+      ollama:
+        enabled: true
+        base-url: ${OLLAMA_BASE_URL:http://localhost:11434/v1}
+        default-model: llama3.1
+      # 国内 OpenAI 兼容(默认关闭,生产按需开启;bridge 自动桥到 spring.ai.openai.*)
+      dashscope:                  # 阿里通义 qwen,OpenAI 兼容 endpoint
+        enabled: true
+        api-key: ${DASHSCOPE_API_KEY:}
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        default-model: qwen3.6-27b
+      glm:                        # 智谱
+        enabled: false
+        api-key: ${GLM_API_KEY:}
+        base-url: https://open.bigmodel.cn/api/paas/v4
+        default-model: glm-4-plus
+      minimax:                    # M2/M3,OpenAI 兼容
+        enabled: false
+        api-key: ${MINIMAX_API_KEY:}
+        base-url: ${MINIMAX_BASE_URL:https://api.minimax.chat/v1}
+        default-model: MiniMax-Text-01
+      # anthropic: 走独立 Anthropic Messages 协议,非 OpenAI 兼容,私 Key 模式不支持
+      # 如需启用,加在下面 + 走 spring-ai-starter-model-anthropic(bridge 会自动
+      # 桥到 spring.ai.anthropic.*)
+      # anthropic:
+      #   enabled: false
+      #   api-key: ${ANTHROPIC_API_KEY:}
+      #   default-model: claude-3-5-haiku-latest
 
 
 

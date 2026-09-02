@@ -1,18 +1,25 @@
 package com.nexusforge.router;
 
-import com.nexusforge.ai.ChatChunk;
-import com.nexusforge.ai.ChatRequest;
-import com.nexusforge.ai.ChatResponse;
+import com.nexusforge.ai.service.FallbackChainService;
+import com.nexusforge.ai.service.FallbackChainService.FallbackChainSource;
+import com.nexusforge.ai.service.FallbackChainService.FallbackChainView;
 import com.nexusforge.config.AiProperties;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
-import com.nexusforge.model.ChatCapabilities;
-import com.nexusforge.model.ChatModel;
-import com.nexusforge.provider.support.ChatModelHttpSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
 import reactor.core.publisher.Flux;
 
 import java.util.HashMap;
@@ -21,9 +28,11 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 /**
- * {@link ChatModelRouter#resolveWithFallback(ChatRequest)} + 触发条件
+ * {@link ChatModelRouter#resolveWithFallback(String, String)} + 触发条件
  * {@link ChatModelRouter#isFallbackTriggering(LlmException, String)} 的单元测试。
  *
  * <p>覆盖:
@@ -34,51 +43,64 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   <li>{@code fallbackChain} 里出现"无效 vendor"(未注册/未启用) → 跳过,不进链</li>
  *   <li>{@code fallbackChain} 出现首选 vendor 自身 → 去重,只出现一次</li>
  *   <li>{@link ChatModelRouter#isFallbackTriggering} 白名单</li>
- *   <li>{@link ChatModelRouter#isPrimaryVendorOpen} 在 {@code http=null} 时恒返回 false</li>
+ *   <li>{@link ChatModelRouter#isPrimaryVendorOpen} 在 Phase 4 退化为恒 false</li>
  * </ul>
  *
- * <p>{@link ChatModelHttpSupport} 的 {@code isVendorOpen} 通过 stub {@link ChatModelHttpSupport}
- * 没法直接 new(其构造由 Spring 注入 {@code props}),故 {@code isPrimaryVendorOpen} 测试只覆盖
- * {@code http=null} 分支;{@code http!=null} 的熔断集成测试在 {@code ConversationIT} / 未来
- * {@code FallbackIT} 中覆盖。
+ * <p>spring-ai-full-migration Phase 6 重写:用 Spring AI 的
+ * {@link ChatModel} / {@link Prompt} 替代原 com.nexusforge.model.ChatModel /
+ * ChatRequest / ChatResponse / ChatChunk / ChatCapabilities。
+ *
+ * <p>DeepSeek 移除 starter 后(commit 1+2+3):本测试 setup 不再注入
+ * {@code deepseek} ChatModel,改用 ollama 作为"3rd enabled vendor"
+ * (跟实际 Spring 容器只装 3 个 ChatModel bean 一致:openai / anthropic / ollama)。
+ * OpenAI 兼容 vendor aliasing(commit 4)测试见
+ * {@link ChatModelRouterAliasingTest}。
  */
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class ChatModelRouterFallbackTest {
 
+    /**
+     * 极简 Spring AI ChatModel 测试桩 — 只实现测试用的 2 个抽象方法。
+     * Spring AI 2.0 的 ChatModel 接口是低层 call(prompt)/stream(prompt),
+     * 其余 5 个 default 方法(call(String)/call(Message...)/getOptions() 等)
+     * 接口有默认实现,不用 override。
+     */
     private static ChatModel stub(String name) {
         return new ChatModel() {
-            @Override public String name() { return name; }
-            @Override public ChatCapabilities capabilities() {
-                return ChatCapabilities.builder().stream(true).tools(false).build();
+            @Override
+            public ChatResponse call(Prompt prompt) {
+                String m = prompt.getOptions() == null ? "?" : prompt.getOptions().getModel();
+                AssistantMessage msg = new AssistantMessage("stub-" + name + "(" + m + ")");
+                return new ChatResponse(List.of(new Generation(msg)));
             }
-            @Override public ChatResponse call(ChatRequest request) {
-                return ChatResponse.builder().model(request.getModel()).content("stub-" + name).build();
-            }
-            @Override public Flux<ChatChunk> stream(ChatRequest request) {
-                return Flux.error(new UnsupportedOperationException("stub"));
+
+            @Override
+            public Flux<ChatResponse> stream(Prompt prompt) {
+                return Flux.error(new UnsupportedOperationException("stub.stream"));
             }
         };
     }
 
     private ChatModel openai;
     private ChatModel anthropic;
-    private ChatModel qwen;
-    private ChatModel deepseek;
     private ChatModel ollama;
     private AiProperties props;
+    @Mock private FallbackChainService fallbackChainService;
 
     @BeforeEach
     void setup() {
         openai     = stub("openai");
         anthropic  = stub("anthropic");
-        qwen       = stub("qwen");
-        deepseek   = stub("deepseek");
         ollama     = stub("ollama");
 
         props = new AiProperties();
         props.setDefaultVendor("openai");
         props.setDefaultModel("gpt-4o-mini");
 
-        // 注册三个有效 vendor + 一个显式禁用的 ollama
+        // 注册三个有效 vendor + 一个显式禁用的 "disabled-vendor"
+        // (用 enabled=false 的 4th vendor 测试"禁用 vendor 跳过"逻辑,
+        //  而不是 ollama 自身 — 跟 Spring 容器只装 3 个 ChatModel bean 保持一致)
         AiProperties.Provider pOpenAi = new AiProperties.Provider();
         pOpenAi.setEnabled(true);
         pOpenAi.setDefaultModel("gpt-4o-mini");
@@ -89,39 +111,45 @@ class ChatModelRouterFallbackTest {
         pAnthropic.setDefaultModel("claude-3-5-haiku");
         props.getProviders().put("anthropic", pAnthropic);
 
-        AiProperties.Provider pQwen = new AiProperties.Provider();
-        pQwen.setEnabled(true);
-        pQwen.setDefaultModel("qwen-turbo");
-        props.getProviders().put("qwen", pQwen);
-
-        AiProperties.Provider pDeepSeek = new AiProperties.Provider();
-        pDeepSeek.setEnabled(true);
-        pDeepSeek.setDefaultModel("deepseek-chat");
-        props.getProviders().put("deepseek", pDeepSeek);
-
         AiProperties.Provider pOllama = new AiProperties.Provider();
-        pOllama.setEnabled(false);            // 禁用
+        pOllama.setEnabled(true);
         pOllama.setDefaultModel("llama3");
         props.getProviders().put("ollama", pOllama);
+
+        AiProperties.Provider pDisabled = new AiProperties.Provider();
+        pDisabled.setEnabled(false);          // 禁用 — 用来测试 "skips disabled vendor"
+        pDisabled.setDefaultModel("disabled-model");
+        props.getProviders().put("disabled-vendor", pDisabled);
     }
 
     private ChatModelRouter router(Map<String, ChatModel> map) {
-        return new ChatModelRouter(map, props, null);   // http=null
+        return new ChatModelRouter(map, props, fallbackChainService);
+    }
+
+    /**
+     * Phase 7 — 把期望的降级链灌进 {@code FallbackChainService.findEffective()}
+     * mock,这样 router 走的是 service 而不是 yaml。原先 {@code stubChain(X)}
+     * 的调用语义("router 读这个 chain")被 {@code stubChain(X)} 替代,router 的
+     * 链构建逻辑(去重/跳过无效 vendor/取 defaultModel)测试意图完全不变。
+     */
+    private void stubChain(List<String> vendors) {
+        lenient().when(fallbackChainService.findEffective()).thenReturn(
+                new FallbackChainView(vendors, FallbackChainSource.DB, null));
     }
 
     private Map<String, ChatModel> mapAll() {
         Map<String, ChatModel> m = new HashMap<>();
         m.put("openai", openai);
         m.put("anthropic", anthropic);
-        m.put("qwen", qwen);
-        m.put("deepseek", deepseek);
         m.put("ollama", ollama);
         return m;
     }
 
-    private ChatRequest req(String model) {
-        return ChatRequest.builder().model(model).messages(List.of()).build();
-    }
+    /**
+     * router 现在接 (vendor, model) 显式两个参数,不再要求 caller 把 vendor 拼到
+     * model 字符串里。原 {@code req("openai:gpt-4o")} 现在直接 {@code ("openai", "gpt-4o")},
+     * 测试代码也跟着用新 API。
+     */
 
     @Nested
     @DisplayName("resolveWithFallback 链构建")
@@ -130,8 +158,8 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("fallbackChain 为空 → 链只有首选")
         void empty_chain_yields_single_hop() {
-            props.setFallbackChain(List.of());
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of());
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(1);
             assertThat(chain.isSingleHop()).isTrue();
             assertThat(chain.primaryVendor()).isEqualTo("openai");
@@ -143,8 +171,8 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("fallbackChain 非空 → 链含首选 + 后续 vendor,每个用各自 defaultModel")
         void chain_appends_fallback_hops_with_default_models() {
-            props.setFallbackChain(List.of("anthropic", "qwen"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("anthropic", "ollama"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(3);
             assertThat(chain.primaryVendor()).isEqualTo("openai");
 
@@ -156,15 +184,15 @@ class ChatModelRouterFallbackTest {
             assertThat(second.vendor()).isEqualTo("anthropic");
             assertThat(second.modelName()).isEqualTo("claude-3-5-haiku");   // 用 Provider.defaultModel
             ChatModelRouter.Resolved third = iter.next();
-            assertThat(third.vendor()).isEqualTo("qwen");
-            assertThat(third.modelName()).isEqualTo("qwen-turbo");
+            assertThat(third.vendor()).isEqualTo("ollama");
+            assertThat(third.modelName()).isEqualTo("llama3");
         }
 
         @Test
         @DisplayName("fallbackChain 出现首选 vendor → 去重,只出现一次")
         void chain_dedups_primary_vendor() {
-            props.setFallbackChain(List.of("openai", "anthropic"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("openai", "anthropic"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(2);
             assertThat(chain.hops())
                     .extracting(ChatModelRouter.Resolved::vendor)
@@ -174,49 +202,49 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("fallbackChain 出现重复 vendor → 去重")
         void chain_dedups_within_fallback() {
-            props.setFallbackChain(List.of("anthropic", "anthropic", "qwen", "qwen"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("anthropic", "anthropic", "ollama", "ollama"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(3);
             assertThat(chain.hops())
                     .extracting(ChatModelRouter.Resolved::vendor)
-                    .containsExactly("openai", "anthropic", "qwen");
+                    .containsExactly("openai", "anthropic", "ollama");
         }
 
         @Test
         @DisplayName("fallbackChain 含未注册 vendor → 跳过")
         void chain_skips_unknown_vendor() {
-            props.setFallbackChain(List.of("anthropic", "ghost-vendor", "qwen"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("anthropic", "ghost-vendor", "ollama"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(3);
             assertThat(chain.hops())
                     .extracting(ChatModelRouter.Resolved::vendor)
-                    .containsExactly("openai", "anthropic", "qwen");
+                    .containsExactly("openai", "anthropic", "ollama");
         }
 
         @Test
         @DisplayName("fallbackChain 含禁用 vendor → 跳过")
         void chain_skips_disabled_vendor() {
-            props.setFallbackChain(List.of("anthropic", "ollama", "qwen"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("anthropic", "disabled-vendor", "ollama"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(3);
             assertThat(chain.hops())
                     .extracting(ChatModelRouter.Resolved::vendor)
-                    .containsExactly("openai", "anthropic", "qwen");
+                    .containsExactly("openai", "anthropic", "ollama");
         }
 
         @Test
         @DisplayName("fallbackChain 含 null/空白项 → 跳过")
         void chain_skips_blank_entries() {
-            props.setFallbackChain(java.util.Arrays.asList("anthropic", null, "  ", "qwen"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(java.util.Arrays.asList("anthropic", null, "  ", "ollama"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(3);
         }
 
         @Test
         @DisplayName("fallbackChain 全是无效 vendor → 链只有首选")
         void chain_all_invalid_yields_single_hop() {
-            props.setFallbackChain(List.of("ghost-1", "ghost-2"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("ghost-1", "ghost-2"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.size()).isEqualTo(1);
             assertThat(chain.isSingleHop()).isTrue();
         }
@@ -224,8 +252,8 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("首选 vendor 走默认:无冒号 model 串 → 默认 vendor + 传入 model")
         void primary_resolved_uses_default_vendor_when_no_colon() {
-            props.setFallbackChain(List.of());
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("claude-3-5-haiku"));
+            stubChain(List.of());
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(null, "claude-3-5-haiku");
             assertThat(chain.hops())
                     .extracting(ChatModelRouter.Resolved::vendor)
                     .containsExactly("openai");
@@ -243,8 +271,8 @@ class ChatModelRouterFallbackTest {
             // map 中不放 anthropic 但 props.providers 中存在
             Map<String, ChatModel> onlyOpenAi = new HashMap<>();
             onlyOpenAi.put("openai", openai);
-            props.setFallbackChain(List.of("anthropic", "qwen"));
-            assertThatThrownBy(() -> router(onlyOpenAi).resolveWithFallback(req("anthropic:claude")))
+            stubChain(List.of("anthropic", "ollama"));
+            assertThatThrownBy(() -> router(onlyOpenAi).resolveWithFallback("anthropic", "claude"))
                     .isInstanceOf(LlmException.class)
                     .extracting("code").isEqualTo(ResultCode.LLM_MODEL_NOT_FOUND.getCode());
         }
@@ -252,20 +280,20 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("首选 vendor 显式禁用 → 立即抛 LLM_MODEL_NOT_FOUND,不展开链")
         void primary_disabled_throws_immediately() {
-            // 用户显式请求被禁用的 ollama
-            props.setFallbackChain(List.of("openai", "qwen"));
-            assertThatThrownBy(() -> router(mapAll()).resolveWithFallback(req("ollama:llama3")))
+            // 用户显式请求被禁用的 disabled-vendor
+            stubChain(List.of("openai", "ollama"));
+            assertThatThrownBy(() -> router(mapAll()).resolveWithFallback("disabled-vendor", "x"))
                     .isInstanceOf(LlmException.class)
                     .extracting("code").isEqualTo(ResultCode.LLM_MODEL_NOT_FOUND.getCode());
         }
         @Test
         @DisplayName("首选 vendor 未在 props.providers 配置 → 立即抛 LLM_MODEL_NOT_FOUND")
         void primary_unconfigured_throws_immediately() {
-            // map 中保留 deepseek,但从 props.providers 中移除 → 走 resolveInternal
+            // map 中保留 ollama,但从 props.providers 中移除 → 走 resolveInternal
             // 第二道校验(p==null 分支)
-            props.getProviders().remove("deepseek");
-            props.setFallbackChain(List.of("openai"));
-            assertThatThrownBy(() -> router(mapAll()).resolveWithFallback(req("deepseek:deepseek-chat")))
+            props.getProviders().remove("ollama");
+            stubChain(List.of("openai"));
+            assertThatThrownBy(() -> router(mapAll()).resolveWithFallback("ollama", "llama3"))
                     .isInstanceOf(LlmException.class)
                     .extracting("code").isEqualTo(ResultCode.LLM_MODEL_NOT_FOUND.getCode());
         }
@@ -336,8 +364,8 @@ class ChatModelRouterFallbackTest {
     class PrimaryVendorOpen {
 
         @Test
-        @DisplayName("http=null → 恒返回 false")
-        void http_null_returns_false() {
+        @DisplayName("Phase 4 简化:不再有 ChatModelHttpSupport,恒返回 false")
+        void always_false() {
             ChatModelRouter.Resolved r = new ChatModelRouter.Resolved(openai, "openai", "gpt-4o");
             assertThat(router(mapAll()).isPrimaryVendorOpen(r)).isFalse();
         }
@@ -356,8 +384,8 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("hops 列表不可变 → 修改抛 UnsupportedOperationException")
         void hops_list_immutable() {
-            props.setFallbackChain(List.of("anthropic"));
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of("anthropic"));
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThatThrownBy(() -> chain.hops().add(
                     new ChatModelRouter.Resolved(openai, "ghost", "x")))
                     .isInstanceOf(UnsupportedOperationException.class);
@@ -366,8 +394,8 @@ class ChatModelRouterFallbackTest {
         @Test
         @DisplayName("isSingleHop:链只有 1 项 → true")
         void single_hop_flag() {
-            props.setFallbackChain(List.of());
-            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback(req("openai:gpt-4o"));
+            stubChain(List.of());
+            ChatModelRouter.FallbackChain chain = router(mapAll()).resolveWithFallback("openai", "gpt-4o");
             assertThat(chain.isSingleHop()).isTrue();
         }
     }

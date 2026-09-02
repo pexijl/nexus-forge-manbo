@@ -20,13 +20,44 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 认证服务：负责 Token 签发、刷新和登出
+ * 认证服务 —— 负责 Token 签发、刷新、登出 + Redis 状态管理。
  *
- * <p>Redis 状态管理：</p>
+ * <p><b>3 个公开流程</b>:
  * <ul>
- *   <li>黑名单：auth:blacklist:{jti} -> "1"（TTL = Token 剩余有效期，用于精确吊销）</li>
- *   <li>版本号：auth:refresh:{userId} -> "{jti}"（TTL = refresh 剩余有效期，用于防重放和踢下线）</li>
+ *   <li>{@link #issueTokens} —— 登录后签发 access + refresh(单点登录实现)</li>
+ *   <li>{@link #refresh} —— 用旧 refresh 换新 access + refresh(一次性轮换)</li>
+ *   <li>{@link #logout} / {@link #logoutAllRefreshTokens} —— 撤销 access / 全部 refresh</li>
  * </ul>
+ *
+ * <p><b>协作方</b>:
+ * <ul>
+ *   <li>{@code AuthController} 三个端点(login / refresh / logout)都调本类</li>
+ *   <li>{@code JwtAuthenticationFilter} 每个请求调 {@link #isBlacklisted} 查黑名单</li>
+ *   <li>{@code AuthEventListener} 消费 {@code UserBannedEvent} 调 {@link #logoutAllRefreshTokens}</li>
+ * </ul>
+ *
+ * <p><b>Redis 状态管理</b>(2 个 key 空间):
+ * <ul>
+ *   <li>黑名单: {@code auth:blacklist:{jti}} → "1"(TTL = Token 剩余有效期,精准吊销)</li>
+ *   <li>版本号: {@code auth:refresh:{userId}} → "{jti}"(TTL = refresh 剩余有效期,
+ *       防重放 + 单点登录 + 踢下线)</li>
+ * </ul>
+ *
+ * <p><b>设计原则</b>:
+ * <ul>
+ *   <li><b>access 不主动撤销</b>:access 是无状态 JWT,签发后无法在 token 层面撤销,
+ *       依赖 ≤15min 自然过期;refresh 通过 Redis 状态精准撤销</li>
+ *   <li><b>单点登录</b>:每次 issueTokens 覆盖 {@code auth:refresh:{userId}},
+ *       旧 refresh 下次刷新时因 jti 不匹配而失效</li>
+ *   <li><b>Token 最小化</b>:claims 只放 username(展示字段),角色每次请求从 Redis 拉
+ *       (见 {@code com.nexusforge.security.PermissionLoader})</li>
+ *   <li><b>双重保险</b>:黑名单 + 版本号同时校验,任何一边丢失另一边兜底</li>
+ * </ul>
+ *
+ * @see com.nexusforge.controller.AuthController 调用方
+ * @see com.nexusforge.filter.JwtAuthenticationFilter 黑名单查询方
+ * @see com.nexusforge.listener.AuthEventListener 踢下线触发方
+ * @see com.nexusforge.util.JwtUtil JWT 构造 + 解析
  */
 @Slf4j
 @Service
@@ -46,12 +77,15 @@ public class AuthService {
      * 不放在 token 中以避免 Token 膨胀及刷新前拿不到最新角色的问题。</p>
      */
     public TokenBundle issueTokens(LoginUser user) {
+        // 1) 构造 claims(只放 username,见 buildClaims Javadoc)
         Map<String, Object> claims = buildClaims(user);
 
+        // 2) 签发双轨:同 userId 同样 claims,仅 type 不同(让 JwtAuthenticationFilter 拒 refresh 进业务接口)
         TokenPair access = jwtUtil.createToken(String.valueOf(user.getUserId()), claims, TokenType.ACCESS);
         TokenPair refresh = jwtUtil.createToken(String.valueOf(user.getUserId()), claims, TokenType.REFRESH);
 
-        // 注册当前 refresh 版本号（覆盖旧的，实现“单点登录”）
+        // 3) 注册 refresh 版本号:覆盖 auth:refresh:{userId} → 实现"单点登录"
+        //    (旧 refresh 下次刷新时 jti 不匹配 → 抛 TOKEN_VERSION_MISMATCH)
         storeRefreshVersion(user.getUserId(), refresh.jti(), refresh.expiresAt());
 
         return new TokenBundle(access, refresh);
@@ -61,34 +95,38 @@ public class AuthService {
      * 刷新：用旧 refresh 换新 access + 新 refresh
      */
     public TokenBundle refresh(String refreshToken) {
+        // 1) 验签:JwtUtil 内部验签名 + 过期 + issuer;失败抛 JwtException(冒泡到 GlobalExceptionHandler)
         Claims claims = jwtUtil.parseToken(refreshToken);
 
+        // 2) type 校验:必须是 refresh,access 一律拒绝(防 access 重复用)
         if (jwtUtil.extractType(claims) != TokenType.REFRESH) {
-            // 非 refresh token，拒绝刷新
             throw new AuthException(ResultCode.INVALID_TOKEN_TYPE);
         }
+
+        // 3) 黑名单校验:被踢过的 refresh 不能换新(防被偷的 token 复用)
         if (isBlacklisted(claims)) {
-            // refresh token 已被吊销
             throw new AuthException(ResultCode.TOKEN_REVOKED);
         }
 
+        // 4) 版本号校验:Redis 存的 auth:refresh:{userId} == 当前 token 的 jti?
+        //    不等 → 期间有过新登录(单点登录踢旧)或 logoutAllRefreshTokens(被封禁)
         Long userId = Long.valueOf(claims.getSubject());
-
-        // 版本号校验：Redis 里存的 jti 必须 == 当前 token 的 jti
         String currentJti = redis.opsForValue().get(jwtProps.getRefreshPrefix() + userId);
         if (currentJti == null || !currentJti.equals(claims.getId())) {
-            // refresh token 已失效（版本不一致）
             throw new AuthException(ResultCode.TOKEN_VERSION_MISMATCH);
         }
 
-        // 重新签发，同时把旧 refresh jti 加入黑名单（避免被复用）
+        // 5) 把旧 refresh jti 加黑名单:即使 Redis 状态丢了(版本号被删),旧 refresh 也不能换新
+        //    双重保险:黑名单 + 版本号同时校验,任何一边失效另一边兜底
         blacklist(claims);
 
-        // 重新读取用户信息（角色变更后能立即生效）
+        // 6) 重新读取用户信息(不沿用旧 LoginUser):让角色变更后能立即生效;
+        //    ⚠️ loadById 找不到时抛 UsernameNotFoundException,会冒泡到 GlobalExceptionHandler
+        //    兜底(见 UserLoader.loadById Javadoc 改进点)
         LoginUser user = userLoader.loadById(userId);
 
+        // 7) 重新签发双轨 + 覆盖版本号,同 issueTokens 流程
         Map<String, Object> claimsMap = buildClaims(user);
-
         TokenPair access = jwtUtil.createToken(String.valueOf(userId), claimsMap, TokenType.ACCESS);
         TokenPair refresh = jwtUtil.createToken(String.valueOf(userId), claimsMap, TokenType.REFRESH);
         storeRefreshVersion(userId, refresh.jti(), refresh.expiresAt());
@@ -100,23 +138,31 @@ public class AuthService {
      * 登出：吊销当前 access + 全部 refresh
      */
     public void logout(String accessToken, String refreshTokenOrNull) {
+        // 1) access 进黑名单(按剩余 TTL 精准加,见 blacklist 注释)
+        //    ⚠️ 改进点:parseToken 可能抛 JwtException(token 损坏 / 伪造 / 过期),
+        //    目前会冒泡到 GlobalExceptionHandler 兜底 500;理想行为应 catch + 返"已登出"
         if (accessToken != null) {
             Claims ac = jwtUtil.parseToken(accessToken);
             blacklist(ac);
         }
         if (refreshTokenOrNull != null) {
+            // 2) refresh 进黑名单 + 删版本号:双重保险让历史 refresh 全部失效
+            //    即便黑名单 Redis 故障丢了,版本号删除也能让旧 refresh 换新时失败
             Claims rc = jwtUtil.parseToken(refreshTokenOrNull);
             blacklist(rc);
-            // 同时清掉版本号，让历史 refresh 全部失效
             redis.delete(jwtProps.getRefreshPrefix() + rc.getSubject());
         }
     }
 
     // ---------- 内部方法 ----------
 
+    /**
+     * 把 token jti 加黑名单,TTL = token 剩余有效期(精准,不浪费 Redis 内存)。
+     * <p>已过期 token(ttl ≤ 0)直接跳过:已经在自然失效,无需加黑名单。
+     */
     private void blacklist(Claims claims) {
         long ttl = jwtUtil.remainingMillis(claims);
-        if (ttl <= 0) return;  // 已过期，无需吊销
+        if (ttl <= 0) return;  // 已过期,无需吊销
         redis.opsForValue().set(
                 jwtProps.getBlacklistPrefix() + claims.getId(),
                 "1",
@@ -124,15 +170,25 @@ public class AuthService {
         );
     }
 
+    /**
+     * 判断 token jti 是否在黑名单。<b>公开方法</b>给 {@code JwtAuthenticationFilter} 用。
+     * <p>{@code Boolean.TRUE.equals(...)} 是 null-safe 写法:Redis 抛 null 时返 false。
+     * 用 {@code hasKey} 而非 {@code get}:只需要判断存在性,省一次反序列化。
+     */
     public boolean isBlacklisted(Claims claims) {
         return Boolean.TRUE.equals(
                 redis.hasKey(jwtProps.getBlacklistPrefix() + claims.getId())
         );
     }
 
+    /**
+     * 存 refresh 版本号 → 实现单点登录 + 踢下线。
+     * <p>同 userId 新登录会覆盖此 key,旧 refresh 下次刷新时 jti 不匹配 → 失效。
+     * TTL = refresh 剩余有效期,refresh 自然过期后自动清理(无需主动删)。
+     */
     private void storeRefreshVersion(Long userId, String jti, long expiresAt) {
         long ttlMs = expiresAt - System.currentTimeMillis();
-        if (ttlMs <= 0) return;
+        if (ttlMs <= 0) return;  // refresh 已过期,无需存
         redis.opsForValue().set(
                 jwtProps.getRefreshPrefix() + userId,
                 jti,

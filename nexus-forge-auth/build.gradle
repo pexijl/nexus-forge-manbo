@@ -14,9 +14,12 @@ repositories {
 dependencies {
 
     implementation project(':nexus-forge-common')
+    implementation project(':nexus-forge-core')
     implementation project(':nexus-forge-user')
 
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
 
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'

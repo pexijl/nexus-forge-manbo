@@ -12,7 +12,11 @@ repositories {
 
 dependencies {
     implementation project(':nexus-forge-common')
+    implementation project(':nexus-forge-core')
+    implementation project(':nexus-forge-file')
     implementation 'org.springframework.security:spring-security-core'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui'
 
     // Flyway — 数据库迁移权威源。本模块持有 db/migration/ SQL 资源。

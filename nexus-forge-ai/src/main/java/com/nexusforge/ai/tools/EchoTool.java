@@ -1,35 +1,35 @@
 package com.nexusforge.ai.tools;
 
-import com.nexusforge.client.ToolExecutor;
-import com.nexusforge.client.ToolResult;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 
 /**
  * 内置 echo 工具 —— 把入参序列化为字符串后回显。
  *
- * <p>P4 Step 12 最小闭环的"占位工具":让端到端 demo 上"调工具 → 总结"链路可跑,
- * 不依赖任何外部服务(DB / HTTP / 文件系统)。
+ * <p>spring-ai-full-migration Phase 3 — 改用 Spring AI 的 {@link Tool @Tool}
+ * 注解替代自实现的 {@code ToolExecutor} SPI:
+ * <ul>
+ *   <li>方法级注解让 Spring AI 自动反射,无需自己写 JSON schema 生成逻辑</li>
+ *   <li>返回 {@link String} 即可(Spring AI 内部用 {@code ToolCallResultConverter}
+ *       序列化为 JSON)</li>
+ *   <li>{@link ToolParam} 描述参数,LLM 读 description 知道传什么</li>
+ * </ul>
  *
- * <p>典型用例:用户在对话里说"用 echo 工具回显 hello",模型返回
+ * <p>典型用例:用户对话里说"用 echo 工具回显 hello",LLM 返回
  * {@code tool_calls=[{name:"echo", arguments:{input:"hello"}}]},本工具把
- * arguments 序列化为 {@code {"input":"hello"}} 回灌,模型下一轮收到该字符串
- * 并据此生成回答。
+ * arguments 拼成字符串回灌,LLM 下一轮收到该字符串并据此生成回答。
  *
- * <p>后续会替换为真实工具(查询 DB / HTTP / 图表 / RAG 检索);本类保留作为
- * 最小可工作的工具示例与单元测试 fixture。
+ * <p>本类作为最小可工作的工具示例 + 单元测试 fixture 保留。真实业务工具
+ * (DB 查询 / HTTP / 图表 / RAG 检索)按同样模式加 — 每个 @Component
+ * 里的 @Tool 方法都自动被 {@code MethodToolCallbackProvider} 扫描进
+ * 工具池。
  */
 @Component
-public class EchoTool implements ToolExecutor {
+public class EchoTool {
 
-    @Override
-    public String name() {
-        return "echo";
-    }
-
-    @Override
-    public ToolResult execute(JsonNode arguments) {
-        String body = (arguments == null || arguments.isNull()) ? "null" : arguments.toString();
-        return ToolResult.ok("echo: " + body);
+    @Tool(description = "回显入参的字符串表示;用于 LLM 测试工具调用回路是否打通,无副作用。")
+    public String echo(@ToolParam(description = "要回显的内容(任意字符串)") String input) {
+        return "echo: " + input;
     }
 }

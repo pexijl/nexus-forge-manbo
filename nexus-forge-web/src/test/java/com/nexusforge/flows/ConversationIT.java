@@ -117,18 +117,21 @@ class ConversationIT extends IntegrationTestBase {
         long convId = createConversation(access, "openai:gpt-4o-mini", "我的第一场对话");
 
         HttpHeaders headers = bearer(access);
-        var listResp = rest().exchange("/api/ai/conversations", HttpMethod.GET,
+        var listResp = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
                 new HttpEntity<>(headers), JsonNode.class);
 
         assertThat(listResp.getStatusCode().is2xxSuccessful()).isTrue();
         JsonNode data = listResp.getBody().get("data");
-        assertThat(data.isArray()).isTrue();
-        assertThat(data.size()).isEqualTo(1);
-        assertThat(data.get(0).get("id").asLong()).isEqualTo(convId);
-        assertThat(data.get(0).get("title").asString()).isEqualTo("我的第一场对话");
-        assertThat(data.get(0).get("model").asString()).isEqualTo("openai:gpt-4o-mini");
-        assertThat(data.get(0).get("pinned").asBoolean()).isFalse();
-        assertThat(data.get(0).get("messageCount").asLong()).isZero();
+        // PageResult 结构:{records, total, page, size, pages, hasNext, hasPrevious}
+        assertThat(data.get("records").size()).isEqualTo(1);
+        assertThat(data.get("total").asInt()).isEqualTo(1);
+        assertThat(data.get("page").asInt()).isEqualTo(1);
+        assertThat(data.get("size").asInt()).isEqualTo(20);
+        assertThat(data.get("records").get(0).get("id").asLong()).isEqualTo(convId);
+        assertThat(data.get("records").get(0).get("title").asString()).isEqualTo("我的第一场对话");
+        assertThat(data.get("records").get(0).get("model").asString()).isEqualTo("openai:gpt-4o-mini");
+        assertThat(data.get("records").get(0).get("pinned").asBoolean()).isFalse();
+        assertThat(data.get("records").get(0).get("messageCount").asLong()).isZero();
     }
 
     @Test
@@ -226,12 +229,14 @@ class ConversationIT extends IntegrationTestBase {
         rest().exchange("/api/ai/conversations/" + conv2 + "/pin",
                 HttpMethod.PATCH, new HttpEntity<>(body, headers), JsonNode.class);
 
-        var listResp = rest().exchange("/api/ai/conversations", HttpMethod.GET,
+        var listResp = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
                 new HttpEntity<>(headers), JsonNode.class);
         JsonNode data = listResp.getBody().get("data");
+        JsonNode records = data.get("records");
         // 置顶的排前面
-        assertThat(data.get(0).get("id").asLong()).isEqualTo(conv2);
-        assertThat(data.get(1).get("id").asLong()).isEqualTo(conv1);
+        assertThat(records.get(0).get("id").asLong()).isEqualTo(conv2);
+        assertThat(records.get(1).get("id").asLong()).isEqualTo(conv1);
+        assertThat(data.get("total").asInt()).isEqualTo(2);
     }
 
     @Test
@@ -245,9 +250,10 @@ class ConversationIT extends IntegrationTestBase {
                 HttpMethod.DELETE, new HttpEntity<>(headers), JsonNode.class);
         assertThat(delResp.getStatusCode().is2xxSuccessful()).isTrue();
 
-        var listResp = rest().exchange("/api/ai/conversations", HttpMethod.GET,
+        var listResp = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
                 new HttpEntity<>(headers), JsonNode.class);
-        assertThat(listResp.getBody().get("data").size()).isZero();
+        assertThat(listResp.getBody().get("data").get("records").size()).isZero();
+        assertThat(listResp.getBody().get("data").get("total").asInt()).isZero();
 
         // 再次 GET 详情应被拒绝:本服务的 GlobalExceptionHandler 把 FORBIDDEN(1005) 映射到 400,
         // 通过 envelope.code=1005 表达"无权访问"
@@ -335,5 +341,62 @@ class ConversationIT extends IntegrationTestBase {
                     assertThat(e.getResponseBodyAsString())
                             .contains("\"code\":" + ResultCode.VALIDATION_FAILED.getCode());
                 });
+    }
+
+    @Test
+    @DisplayName("软删 → 列表中消失 → restore → 列表中重新出现(BaseEntity.@SQLDelete 验证)")
+    void soft_delete_then_restore_round_trip() {
+        String access = freshAccessToken();
+        long convId = createConversation(access, "openai:gpt-4o-mini", "软删+恢复测试");
+        HttpHeaders headers = bearer(access);
+
+        // 1. 刚创建时在列表里
+        var listBefore = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
+                new HttpEntity<>(headers), JsonNode.class);
+        assertThat(listBefore.getBody().get("data").get("records").size()).isEqualTo(1);
+        assertThat(listBefore.getBody().get("data").get("total").asInt()).isEqualTo(1);
+
+        // 2. 软删
+        var delResp = rest().exchange("/api/ai/conversations/" + convId, HttpMethod.DELETE,
+                new HttpEntity<>(headers), JsonNode.class);
+        assertThat(delResp.getStatusCode().is2xxSuccessful()).isTrue();
+
+        // 3. 列表中消失(@SQLRestriction 自动过滤)
+        var listAfterDel = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
+                new HttpEntity<>(headers), JsonNode.class);
+        assertThat(listAfterDel.getBody().get("data").get("records").size()).isZero();
+        assertThat(listAfterDel.getBody().get("data").get("total").asInt()).isZero();
+
+        // 4. GET 详情也被过滤(查不到 → 抛 FORBIDDEN)
+        assertThatThrownBy(() -> rest().exchange("/api/ai/conversations/" + convId, HttpMethod.GET,
+                new HttpEntity<>(headers), JsonNode.class))
+                .isInstanceOfSatisfying(HttpClientErrorException.BadRequest.class, e ->
+                        assertThat(e.getResponseBodyAsString())
+                                .contains("\"code\":" + ResultCode.FORBIDDEN.getCode()));
+
+        // 5. 恢复
+        var restoreResp = rest().exchange("/api/ai/conversations/" + convId + "/restore",
+                HttpMethod.POST, new HttpEntity<>(headers), JsonNode.class);
+        assertThat(restoreResp.getStatusCode().is2xxSuccessful()).isTrue();
+
+        // 6. 列表重新出现
+        var listAfterRestore = rest().exchange("/api/ai/conversations?page=1&size=20", HttpMethod.GET,
+                new HttpEntity<>(headers), JsonNode.class);
+        assertThat(listAfterRestore.getBody().get("data").get("records").size()).isEqualTo(1);
+        assertThat(listAfterRestore.getBody().get("data").get("records").get(0).get("id").asLong())
+                .isEqualTo(convId);
+
+        // 7. GET 详情也能拿到
+        var detailResp = rest().exchange("/api/ai/conversations/" + convId, HttpMethod.GET,
+                new HttpEntity<>(headers), JsonNode.class);
+        assertThat(detailResp.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(detailResp.getBody().get("data").get("id").asLong()).isEqualTo(convId);
+
+        // 8. 重复 restore(对话已活)→ 0 行 → 抛 FORBIDDEN
+        assertThatThrownBy(() -> rest().exchange("/api/ai/conversations/" + convId + "/restore",
+                HttpMethod.POST, new HttpEntity<>(headers), JsonNode.class))
+                .isInstanceOfSatisfying(HttpClientErrorException.BadRequest.class, e ->
+                        assertThat(e.getResponseBodyAsString())
+                                .contains("\"code\":" + ResultCode.FORBIDDEN.getCode()));
     }
 }

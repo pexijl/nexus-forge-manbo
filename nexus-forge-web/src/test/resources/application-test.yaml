@@ -11,6 +11,16 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop # 每次启动时都重新创建数据库
+  devtools:
+    # 集成测试必须禁 DevTools:它默认会监视 IDE 输出目录(如 nexus-forge-core/bin/main/),
+    # 而该目录可能残留与 build/classes 不一致的旧 class,导致 GlobalExceptionHandler.mapStatus
+    # 等修改不生效(踩坑:密码重置测试 2014 → 实际 400,因为 devtools 加载了旧 mapStatus)。
+    restart:
+      enabled: false
+      # 双保险:即便 restart.enabled 失效,显式排除 IDE 编译输出目录
+      exclude: '**/bin/**'
+    livereload:
+      enabled: false
 
 jwt:
   secret: ${TEST_JWT_SECRET:dGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQ=} # 测试环境的 JWT 密钥
@@ -21,6 +31,17 @@ jwt:
   enable-blacklist: true # 是否启用黑名单
   blacklist-prefix: 'auth:blacklist:test:' # 黑名单前缀
   refresh-prefix: 'auth:refresh:test:' # 刷新令牌前缀
+
+# 邮件:集成测试走 logging 模式(LoggingEmailSender);MailCapture helper 从 outDir 读邮件
+mail:
+  mode: logging
+  from: "Nexus Forge Test <test@nexus-forge.local>"
+password-reset:
+  code-ttl-seconds: 300
+  max-attempts: 5
+  rate-limit-window-seconds: 60
+  rate-limit-email-max: 1
+  rate-limit-ip-max: 3
 
 management:
   endpoints:

@@ -12,7 +12,7 @@
 
 | 维度 | 取值 |
 |------|------|
-| 镜像 | `postgres:latest`(2026-07 指向 PG 18.x) |
+| 镜像 | `postgres:latest`(2026-09 指向 PG 18.x) |
 | 端口 | 5432 |
 | 鉴权 | `POSTGRES_PASSWORD`(`POSTGRES_PASSWORD_FILE` 亦可,本编排未用) |
 | PGDATA | `/var/lib/postgresql/data`(显式覆盖镜像默认值 `/var/lib/postgresql/18/docker`,绑路径稳定) |

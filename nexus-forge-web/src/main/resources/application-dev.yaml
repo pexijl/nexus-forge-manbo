@@ -36,29 +36,42 @@ spring:
     show-sql: true # 显示SQL语句，方便调试
     open-in-view: false # 关闭Open Session in View，避免性能问题和潜在的内存泄漏
   ai:
+    # spring.ai.openai.api-key 直写在基线 application.yaml(所有 profile 共享占位符)
+    # dev 不重复;providers.openai.enabled: false 让 ProviderPropertiesBridge 跳过 openai,
+    # 所以基线直写不会被 openai 段覆盖;但 providers.deepseek.enabled: true 会让 bridge
+    # 从 deepseek 段写出 spring.ai.openai.api-key = ${DEEPSEEK_API_KEY:placeholder...}
+    # (addFirst 赢),实际 dev 跑的是 deepseek 的 key(预期:国内网络走 deepseek)。
     enabled: ${SPRING_AI_ENABLED:true}
-    default-vendor: ${SPRING_AI_DEFAULT_VENDOR:qwen}
+    default-vendor: ${SPRING_AI_DEFAULT_VENDOR:}
     # 注意:default-model(根级)默认不配;管理员通过 PUT /api/admin/ai/global-default
     # 写入 ai_global_default 表后,系统模式调用才会用上 model。
     # 启动校验:每个 enabled=true 的 vendor 必须有 yaml-level default-model(否则
     # 容器构造失败 fail-fast);但运行时 system 模式请求一律从 ai_global_default 表读,
     # 不会被 yaml 兜底值覆盖。
-    # default-model: ${SPRING_AI_DEFAULT_MODEL:qwen3.6-27b}
+    # 双 namespace 优先级规则(更正):
+    #   providers.<v>.enabled=true  → bridge 桥 providers.<v>.* 到 spring.ai.<starter>.*,
+    #                                此时不要直写 spring.ai.<starter>.* (bridge addFirst
+    #                                会赢,直写被静默覆盖)
+    #   providers.<v>.enabled=false → bridge 跳过,此时可以直写 spring.ai.<starter>.*
+    #                                喂 starter 装配 bean(典型场景:dev 关闭 openai vendor
+    #                                路由但 deepseek 复用 openai starter,直写 deepseek key)
+    # Phase 5 起非 OpenAI 协议的 vendor 仍走 providers.* 统一 schema。
     providers:
-      # 关闭 OpenAI(国内网络不通,留着只是被构造时抛 LLM_CONFIG_MISSING)
+      # 关闭 OpenAI vendor 路由(国内网络不通),实际请求走 deepseek
       openai:
         enabled: false
-      # DeepSeek 关闭(Qwen 验证期间不启用,需要时打开即可)
+      # DeepSeek 启用(国内可直连;DeepSeek 之前是独立 spring-ai-starter-model-deepseek,
+      # phase X 已移除 — 改走 OpenAI starter,bridge 把 providers.deepseek.* 桥到
+      # spring.ai.openai.*,ChatModelRouter 通过 aliasing 把 "deepseek" vendor 路由
+      # 到 openAiChatModel bean)
       deepseek:
-        enabled: false
-      # 阿里云通义千问(Qwen / DashScope OpenAI 兼容模式)
-      qwen:
         enabled: true
-        # vendor-level default-model:仅用于容器构造期,vendor-level default-model 兜底。
-        # 启动后不会影响 ai_global_default 表的 model;system 模式请求一律从表读。
-        # 用户感知到的"全局模型"完全由 ai_global_default 表控制(管理员通过 admin API 改)。
-        default-model: ${SPRING_AI_QWEN_DEFAULT_MODEL:qwen-turbo}
-        api-key: ${DASHSCOPE_API_KEY}
+      # Ollama 启用(本地推理,需要本地 ollama 进程;没装就保留 base 的 enabled: true 但
+      # bridge 桥完 starter 还是连不到,启动会自然报错暴露)
+      ollama:
+        enabled: true
+      # 国内 vendor(dashscope / glm / minimax)默认关,按需在 dev override
+      # 启用(改了 enabled: true + 配对应 *_API_KEY env var 即可,bridge 自动桥)
     # P5 — Token 用量配额(24h 滑窗,长期防刷)
     quota:
       enabled: ${SPRING_AI_QUOTA_ENABLED:true}
@@ -93,4 +106,16 @@ jwt:
 
 storage:
   vendor: ${STORAGE_VENDOR:rustfs}
+
+# 邮件发送:dev 默认 logging 模式(落 build/dev-mail/ + log INFO)。
+# PasswordResetProperties 在 password-reset.* 段;默认值见 PasswordResetProperties 字段。
+mail:
+  mode: ${MAIL_MODE:logging}
+  from: ${MAIL_FROM:Nexus Forge <no-reply@nexus-forge.local>}
+password-reset:
+  code-ttl-seconds: ${PWD_RESET_CODE_TTL:300}
+  max-attempts: ${PWD_RESET_MAX_ATTEMPTS:5}
+  rate-limit-window-seconds: ${PWD_RESET_RATE_WINDOW:60}
+  rate-limit-email-max: ${PWD_RESET_RATE_EMAIL:1}
+  rate-limit-ip-max: ${PWD_RESET_RATE_IP:3}
 

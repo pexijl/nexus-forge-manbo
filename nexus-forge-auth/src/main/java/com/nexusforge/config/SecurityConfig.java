@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import jakarta.servlet.DispatcherType;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -24,6 +25,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
  */
 @Configuration
 @EnableWebSecurity // 启用 Spring Security 的 Web 安全功能
+@EnableMethodSecurity   // 启用 @PreAuthorize / @PostAuthorize 方法级鉴权
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -69,7 +71,11 @@ public class SecurityConfig {
                         // (响应已 commit,客户端无感知,仅日志噪声)。按 DispatcherType 放行最稳,
                         // 不依赖 URL 匹配。
                         .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
-                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/refresh",
+                                         "/api/auth/password/reset/**",
+                                         // 账号生命周期:注销 / 撤销都靠邮件链接,
+                                         // 公开端点由 controller 的 @SecurityRequirements 进一步限定
+                                         "/api/users/me/delete/**", "/api/users/me/restore").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()  // SpringDoc
                         .requestMatchers("/actuator/health", "/actuator/metrics/**", "/actuator/prometheus/**").permitAll()
                         .anyRequest().authenticated()

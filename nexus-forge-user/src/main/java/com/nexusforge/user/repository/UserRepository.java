@@ -13,6 +13,15 @@ import java.util.Optional;
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
     Optional<User> findByEmail(String email);
+
+    /**
+     * 大小写不敏感邮箱查询 —— 密码重置场景("ALICE@x.com" 与 "alice@x.com" 视为同一用户)。
+     * 由 Spring Data JPA 派生:方法名包含 IgnoreCase 即生成 LOWER(email) 比较。
+     * 受 {@code @SQLRestriction("deleted_at IS NULL")} 影响,已软删用户不会命中 —— 符合
+     * "已软删用户不重置密码" 的设计。
+     */
+    Optional<User> findByEmailIgnoreCase(String email);
+
     default Optional<User> findByAccount(String account) {
         return findByUsername(account)
                 .or(() -> findByEmail(account));
