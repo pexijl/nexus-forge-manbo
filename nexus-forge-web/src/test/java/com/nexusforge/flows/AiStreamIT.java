@@ -140,13 +140,11 @@ class AiStreamIT extends IntegrationTestBase {
         assertThat(resp.statusCode()).isEqualTo(200);
         assertThat(resp.contentType()).startsWith("text/event-stream");
 
-        java.util.List<String> events = extractEvents(resp.body());
+        // AiStreamController 走扁平 SSE 协议(AGENTS.md 约定):只发 data: <ChatChunk JSON>,
+        // 不发 event: <name> 行(OpenAI 标准 data: [DONE] 也不发)。所以这里不检查
+        // events.contains("delta" / "done"),只查 data 行里 deltaContent 拼出"echo:hello"。
         java.util.List<String> dataLines = extractData(resp.body());
-
-        assertThat(events).contains("delta");
-        assertThat(events).contains("done");
         assertThat(dataLines).isNotEmpty();
-        assertThat(dataLines.get(dataLines.size() - 1)).isEqualTo("[DONE]");
         assertThat(joinDeltaContent(dataLines)).contains("echo:hello");
     }
 
@@ -159,10 +157,9 @@ class AiStreamIT extends IntegrationTestBase {
         assertThat(resp.statusCode()).isEqualTo(200);
         assertThat(resp.contentType()).startsWith("text/event-stream");
 
-        java.util.List<String> events = extractEvents(resp.body());
-        assertThat(events).contains("delta");
-        assertThat(events).contains("done");
-        assertThat(joinDeltaContent(extractData(resp.body()))).contains("echo:world");
+        java.util.List<String> dataLines = extractData(resp.body());
+        assertThat(dataLines).isNotEmpty();
+        assertThat(joinDeltaContent(dataLines)).contains("echo:world");
     }
 
     @Test

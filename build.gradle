@@ -42,8 +42,17 @@ subprojects {
 	ext {
 		springdocVersion = '3.0.3'
 		reactorNettyVersion = '1.2.6'
+		// spring-ai-full-migration:Spring AI 2.0.x 与 Spring Boot 4.0.x / 4.1.x 兼容。
+		// 这里只锁定 BOM,具体 starter 在各模块 build.gradle 按需引入。
+		springAiBomVersion = '2.0.0'
 	}
 	dependencyManagement {
+		// Spring AI 全家桶版本由 spring-ai-bom 统一管理,模块里只引 starter 名,不写版本。
+		// spring-ai-starter-model-deepseek / spring-ai-starter-model-openai / spring-ai-starter-model-anthropic 等
+		// 都由 BOM 解析具体 artifact 版本。
+		imports {
+			mavenBom "org.springframework.ai:spring-ai-bom:${springAiBomVersion}"
+		}
 		dependencies {
 			dependency "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdocVersion}"
 			// P2 流式:WebClient 用 Reactor Netty 传输层。spring-web 的 ReactorClientHttpConnector

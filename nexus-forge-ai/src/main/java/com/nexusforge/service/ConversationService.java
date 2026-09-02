@@ -1,30 +1,54 @@
 package com.nexusforge.service;
-import com.nexusforge.ai.*;
+
 import com.nexusforge.ai.service.PreferenceResolver;
+import com.nexusforge.base.PageResult;
 import com.nexusforge.client.LlmClient;
 import com.nexusforge.client.UsageRecorder;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
 import com.nexusforge.controller.dto.UpdateTitleDto;
-import com.nexusforge.controller.vo.*;
+import com.nexusforge.controller.vo.ConversationDetailVo;
+import com.nexusforge.controller.vo.ConversationVo;
+import com.nexusforge.controller.vo.MessageVo;
+import com.nexusforge.controller.vo.UsageVo;
 import com.nexusforge.entity.AiConversation;
 import com.nexusforge.entity.AiMessage;
 import com.nexusforge.entity.AiMessageUsage;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.BusinessException;
-import com.nexusforge.model.ChatModel;
 import com.nexusforge.repository.AiConversationRepository;
 import com.nexusforge.repository.AiMessageRepository;
 import com.nexusforge.repository.AiMessageUsageRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
 
-import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * spring-ai-full-migration Phase 2b — 业务侧主流程。
+ *
+ * <p>sendMessage 改为 Spring AI 类型:
+ * <ul>
+ *   <li>DB 的 {@link AiMessage} 仍是 source of truth(暂不重写列结构)</li>
+ *   <li>送进 LLM 的消息列表由 {@link ContextWindowBuilder} 产出 Spring AI {@link Message}</li>
+ *   <li>LlmClient 调 {@code call(Prompt, vendor, model)} 拿 Spring AI {@link ChatResponse}</li>
+ *   <li>助手回复从 Spring AI {@link AssistantMessage} 转换回 {@link AiMessage} 持久化</li>
+ *   <li>tool loop 暂未实现 — Phase 3 改用 {@code ToolCallingManager} + {@code ChatClient} 链</li>
+ * </ul>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -37,25 +61,15 @@ public class ConversationService {
     private final ContextWindowBuilder contextBuilder;
     private final UsageRecorder usageRecorder;
     private final QuotaService quotaService;
-    /** P7:用户偏好解析器(决定 key source 与私 Key 路径) */
     private final PreferenceResolver preferenceResolver;
-    /**
-     * P4 Step 11:把 {@link ChatResponse#getToolCalls()} 序列化为 JSON 写入
-     * {@link AiMessage#getToolCalls()} 列。这里用 {@code tools.jackson} 包路径
-     * 与 Spring 7 Boot 默认 {@code tools.jackson.databind.ObjectMapper} bean 一致。
-     */
-    private final ObjectMapper objectMapper;
-    /** P4 Step 12:工具调用循环用的注册表(收集所有 {@code ToolExecutor} bean)。 */
-    private final com.nexusforge.client.ToolRegistry toolRegistry;
-    /** P4 Step 12:读 {@code maxToolTurns} 控制工具循环上限。 */
-    private final com.nexusforge.config.AiProperties props;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     // ──────────────────────────────────────────────
     // 创建会话
+    // ──────────────────────────────────────────────
 
-    /**
-     * 创建新对话。可选传入 system prompt 作为首条消息。
-     */
     @Transactional
     public ConversationVo create(Long userId, CreateConversationDto dto) {
         AiConversation conv = new AiConversation();
@@ -70,118 +84,86 @@ public class ConversationService {
     }
 
     // ──────────────────────────────────────────────
-    // 发送消息(核心:上下文构建 + LLM 调用 + 持久化)
+    // 发送消息(Phase 2b:无 tool loop)
     // ──────────────────────────────────────────────
 
-    /**
-     * 在对话中发送用户消息并获取 AI 回复。
-     * <ol>
-     *   <li>校验对话归属</li>
-     *   <li>P7:解析偏好 → 决定 key source + 私 Key 路径</li>
-     *   <li>配额校验(系统 Key 才走;私 Key 跳过)</li>
-     *   <li>持久化用户消息</li>
-     *   <li>从 DB 加载历史消息,构建上下文窗口</li>
-     *   <li>按 key source 调 LlmClient</li>
-     *   <li>持久化 AI 回复 + token 用量</li>
-     * </ol>
-     */
     @Transactional
     public MessageVo sendMessage(Long userId, Long conversationId, SendMessageDto dto) {
         // 1. 校验对话归属
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
 
-        // 如果前端传了 model,覆盖对话模型(切换模型)
+        // 如果前端传了 model,覆盖对话模型
         if (dto.getModel() != null && !dto.getModel().isBlank()) {
             conv.setModel(dto.getModel());
         }
 
-        // P7:解析偏好(用对话当前 model 字段作为 hint)。这一步会读 user_ai_preference / ai_global_default。
-        PreferenceResolver.Resolved pref = preferenceResolver.resolve(userId, conv.getModel());
+        // 2. 解析偏好 — Phase 3:第三参 proxyId 优先级最高(覆盖对话默认 model)
+        PreferenceResolver.Resolved pref = preferenceResolver.resolve(userId, conv.getModel(), dto.getProxyId());
 
-        // P5 Step 5/8 + P7:配额校验(私 Key 模式直接放行)。
+        // 3. 配额校验(私 Key 模式直接放行)
         quotaService.check(userId, estimateTokens(dto.getContent()), pref.source());
 
-        // 2. 持久化用户消息
+        // 4. 持久化用户消息
         int nextSeq = messageRepo.findMaxSeq(conversationId) + 1;
         AiMessage userMsg = new AiMessage();
         userMsg.setConversationId(conversationId);
-        userMsg.setRole(Role.USER.name());
+        userMsg.setRole("USER");
         userMsg.setContent(dto.getContent());
         userMsg.setSeq(nextSeq);
         messageRepo.save(userMsg);
 
-        // 3. 构建上下文窗口
+        // 5. 构建上下文窗口(Spring AI Message 列表)
         List<AiMessage> history = messageRepo.findByConversationIdOrderBySeqAsc(conversationId);
-        List<ChatMessage> context = contextBuilder.build(history, conv.getModel());
+        List<Message> contextMessages = contextBuilder.build(history, conv.getModel());
+        Prompt prompt = new Prompt(contextMessages);
 
-        // 4. 调用 LLM(按 key source 走不同路径)
-        ChatRequest request = ChatRequest.builder()
-                .model(conv.getModel())
-                .messages(context)
-                .build();
-        if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
-            // 把对话 model 强制设为 pref.vendor:pref.model,保证 LlmClient 私有路径走对的 ChatModel
-            request.setModel(pref.vendor() + ":" + pref.model());
-        }
-
+        // 6. 调用 LLM(按 key source 走不同路径)
         ChatResponse response;
         try {
             if (pref.source() == PreferenceResolver.KeySource.USER_PRIVATE_KEY) {
                 ChatModel privateModel = preferenceResolver.resolveChatModel(pref);
-                // P4 Step 12:工具调用循环(私 Key 路径,不走降级链)
-                response = llmClient.callWithToolLoop(request, privateModel, toolRegistry, props.getMaxToolTurns());
+                // Phase 3:用实际 vendor 校验 + model 写进 prompt options
+                Prompt callPrompt = LlmClient.withModelInOptions(prompt, pref.vendor(), pref.model());
+                response = llmClient.call(callPrompt, privateModel, pref.vendor());
             } else {
-                // P4 Step 12:工具调用循环(系统 Key 路径,走降级链)
-                response = llmClient.callWithToolLoop(request, toolRegistry, props.getMaxToolTurns());
+                response = llmClient.call(prompt, pref.vendor(), pref.model());
             }
         } catch (Exception e) {
             log.error("[AI] LLM 调用失败: convId={}, model={}, mode={}", conversationId, conv.getModel(), pref.source(), e);
-            // P5 Step 4: 失败路径也计数,告警面板能统计失败率(否则失败请求从 metrics 中消失)
+            // 失败路径也计数
             usageRecorder.recordRequest(conv.getModel(), pref.source());
             throw e;
         }
 
-        // 5. 持久化 AI 回复
+        // 7. 从 Spring AI ChatResponse 提取助手回复
+        AssistantMessage assistantMsg = extractAssistantMessage(response);
+        String content = assistantMsg != null && assistantMsg.getText() != null ? assistantMsg.getText() : "";
+
+        // 8. 持久化 AI 回复
         AiMessage aiMsg = new AiMessage();
         aiMsg.setConversationId(conversationId);
-        aiMsg.setRole(Role.ASSISTANT.name());
-        aiMsg.setContent(response.getContent());
+        aiMsg.setRole("ASSISTANT");
+        aiMsg.setContent(content);
         aiMsg.setSeq(nextSeq + 1);
-        // P4 Step 11:assistant 触发工具调用时,把 tool_calls 序列化为 JSON 写入专用列。
-        // 当前不执行工具、不重入 LLM —— 完整 function-calling 循环是后续 Step 12+。
-        // 此处仅做"曝光":对话详情接口能读到 assistant 选择调用了哪些工具、入参是什么。
-        String toolCallsJson = null;
-        if (response.getToolCalls() != null && !response.getToolCalls().isEmpty()) {
-            try {
-                toolCallsJson = objectMapper.writeValueAsString(response.getToolCalls());
-                aiMsg.setToolCalls(toolCallsJson);
-            } catch (Exception e) {
-                // JSON 序列化失败不应阻塞消息持久化,只记日志
-                log.warn("[AI] tool_calls JSON 序列化失败: convId={}, seq={}, err={}",
-                        conversationId, aiMsg.getSeq(), e.toString());
-            }
-        }
         messageRepo.save(aiMsg);
 
-        // 6. 持久化 token 用量
-        if (response.getUsage() != null) {
-            AiMessageUsage usage = new AiMessageUsage();
-            usage.setMessageId(aiMsg.getId());
-            usage.setPromptTokens(response.getUsage().getPromptTokens());
-            usage.setCompletionTokens(response.getUsage().getCompletionTokens());
-            usage.setTotalTokens(response.getUsage().getTotalTokens());
-            usage.setModel(response.getModel());
-            usageRepo.save(usage);
-
-            // P5 Step 4: 把本次 LLM 调用的 token 消耗上报为 Micrometer counter
-            usageRecorder.recordMetrics(response.getUsage(), response.getModel(), pref.source());
+        // 9. 持久化 token 用量(Spring AI Usage)
+        Usage usage = extractUsage(response);
+        if (usage != null) {
+            AiMessageUsage usageEntity = new AiMessageUsage();
+            usageEntity.setMessageId(aiMsg.getId());
+            usageEntity.setPromptTokens(usage.getPromptTokens() != null ? usage.getPromptTokens().intValue() : 0);
+            usageEntity.setCompletionTokens(usage.getCompletionTokens() != null ? usage.getCompletionTokens().intValue() : 0);
+            usageEntity.setTotalTokens(usage.getTotalTokens() != null ? usage.getTotalTokens().intValue() : 0);
+            usageEntity.setModel(response.getMetadata() != null ? response.getMetadata().getModel() : conv.getModel());
+            usageRepo.save(usageEntity);
+            usageRecorder.recordMetrics(usage, conv.getModel(), pref.source());
         } else {
-            // P5 Step 8: LLM 未返回 usage 时,仍计一次请求(告警面板能统计到)
             usageRecorder.recordRequest(conv.getModel(), pref.source());
         }
 
-        // 7. 自动更新标题(取第一条 USER 消息前 30 字)
+        // 10. 自动更新标题
         if ("新对话".equals(conv.getTitle())) {
             String autoTitle = dto.getContent().length() <= 30
                     ? dto.getContent()
@@ -189,46 +171,63 @@ public class ConversationService {
             conv.setTitle(autoTitle);
         }
 
-        log.info("[AI] 消息已处理: convId={}, seq={}, tokens={}, toolCalls={}",
-                conversationId, aiMsg.getSeq(),
-                response.getUsage() != null ? response.getUsage().getTotalTokens() : "N/A",
-                toolCallsJson != null ? "yes" : "no");
+        log.info("[AI] 消息已处理: convId={}, seq={}, contentLen={}",
+                conversationId, aiMsg.getSeq(), content.length());
 
-        return toMessageVo(aiMsg, response.getUsage(), response.getToolCalls());
+        return toMessageVo(aiMsg, usage);
+    }
+
+    /**
+     * 从 Spring AI ChatResponse 提取第一个 Generation 的 AssistantMessage。
+     */
+    private static AssistantMessage extractAssistantMessage(ChatResponse response) {
+        if (response == null || response.getResults() == null || response.getResults().isEmpty()) {
+            return null;
+        }
+        return response.getResults().get(0).getOutput();
+    }
+
+    private static Usage extractUsage(ChatResponse response) {
+        if (response == null || response.getMetadata() == null) return null;
+        return response.getMetadata().getUsage();
     }
 
     // ──────────────────────────────────────────────
     // 查询
     // ──────────────────────────────────────────────
 
-    /**
-     * 列出用户的全部对话(置顶优先,更新时间倒序)
-     */
     public List<ConversationVo> listConversations(Long userId) {
         List<AiConversation> convs = conversationRepo.findByUserIdOrderByPinnedDescUpdatedAtDesc(userId);
-        return convs.stream().map(c -> {
-            Long msgCount = messageRepo.countByConversationId(c.getId());
-            // 获取最后一条消息预览
-            List<AiMessage> lastMsgs = messageRepo.findLastNMessages(c.getId(), 1);
-            String lastMsg = lastMsgs.isEmpty() ? null : lastMsgs.get(0).getContent();
-            if (lastMsg != null && lastMsg.length() > 100) {
-                lastMsg = lastMsg.substring(0, 100) + "...";
-            }
-            return toConversationVo(c, msgCount, lastMsg);
-        }).toList();
+        return convs.stream().map(this::toVoWithPreview).toList();
     }
 
-    /**
-     * 获取对话详情(含全部消息)
-     */
+    public PageResult<ConversationVo> listConversationsPaged(Long userId, int page, int size) {
+        int safePage = Math.max(1, page);
+        int safeSize = (size <= 0 || size > 200) ? 20 : size;
+
+        Pageable pageable = PageRequest.of(safePage - 1, safeSize);
+        Page<AiConversation> convPage = conversationRepo
+                .findByUserIdOrderByPinnedDescUpdatedAtDesc(userId, pageable);
+        Page<ConversationVo> voPage = convPage.map(this::toVoWithPreview);
+        return PageResult.of(voPage);
+    }
+
+    private ConversationVo toVoWithPreview(AiConversation c) {
+        Long msgCount = messageRepo.countByConversationId(c.getId());
+        List<AiMessage> lastMsgs = messageRepo.findLastNMessages(c.getId(), 1);
+        String lastMsg = lastMsgs.isEmpty() ? null : lastMsgs.get(0).getContent();
+        if (lastMsg != null && lastMsg.length() > 100) {
+            lastMsg = lastMsg.substring(0, 100) + "...";
+        }
+        return toConversationVo(c, msgCount, lastMsg);
+    }
+
     public ConversationDetailVo getConversation(Long userId, Long conversationId) {
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
 
         List<AiMessage> messages = messageRepo.findByConversationIdOrderBySeqAsc(conversationId);
-        // 批量加载用量(避免 N+1)
         List<Long> messageIds = messages.stream().map(AiMessage::getId).toList();
-        // 简单实现:P3 先逐条查,P5 可优化为 IN 查询
         List<MessageVo> messageVos = messages.stream().map(m -> {
             AiMessageUsage usage = usageRepo.findById(m.getId()).orElse(null);
             return toMessageVo(m, usage);
@@ -249,9 +248,6 @@ public class ConversationService {
     // 修改
     // ──────────────────────────────────────────────
 
-    /**
-     * 重命名对话标题
-     */
     @Transactional
     public ConversationVo renameConversation(Long userId, Long conversationId, UpdateTitleDto dto) {
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
@@ -261,9 +257,6 @@ public class ConversationService {
         return toConversationVo(conv, msgCount, null);
     }
 
-    /**
-     * 置顶/取消置顶
-     */
     @Transactional
     public ConversationVo pinConversation(Long userId, Long conversationId, boolean pinned) {
         AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
@@ -273,16 +266,26 @@ public class ConversationService {
         return toConversationVo(conv, msgCount, null);
     }
 
-    /**
-     * 删除对话(级联删除消息和用量)
-     */
     @Transactional
     public void deleteConversation(Long userId, Long conversationId) {
-        int deleted = conversationRepo.deleteByIdAndUserId(conversationId, userId);
-        if (deleted == 0) {
-            throw new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问");
+        AiConversation conv = conversationRepo.findByIdAndUserId(conversationId, userId)
+                .orElseThrow(() -> new BusinessException(ResultCode.FORBIDDEN, "对话不存在或无权访问"));
+        conversationRepo.delete(conv);
+        log.info("[AI] 软删会话: userId={}, convId={}", userId, conversationId);
+    }
+
+    @Transactional
+    public void restoreConversation(Long userId, Long conversationId) {
+        int restored = entityManager.createNativeQuery(
+                "UPDATE ai_conversations SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP " +
+                "WHERE id = :id AND user_id = :userId AND deleted_at IS NOT NULL")
+                .setParameter("id", conversationId)
+                .setParameter("userId", userId)
+                .executeUpdate();
+        if (restored == 0) {
+            throw new BusinessException(ResultCode.FORBIDDEN, "对话不存在、未软删或无权访问");
         }
-        log.info("[AI] 删除会话: userId={}, convId={}", userId, conversationId);
+        log.info("[AI] 恢复会话: userId={}, convId={}", userId, conversationId);
     }
 
     // ──────────────────────────────────────────────
@@ -302,7 +305,11 @@ public class ConversationService {
         return vo;
     }
 
-    private MessageVo toMessageVo(AiMessage msg, ChatUsage usage) {
+    /**
+     * Phase 2b 简化版:tool_calls 字段暂不返回(MessageVo 字段保留但始终 null)。
+     * Phase 3 重做 tool loop 时再恢复。
+     */
+    private MessageVo toMessageVo(AiMessage msg, Usage usage) {
         MessageVo vo = new MessageVo();
         vo.setId(msg.getId());
         vo.setRole(msg.getRole());
@@ -311,25 +318,15 @@ public class ConversationService {
         vo.setCreatedAt(msg.getCreatedAt());
         if (usage != null) {
             UsageVo uv = new UsageVo();
-            uv.setPromptTokens(usage.getPromptTokens());
-            uv.setCompletionTokens(usage.getCompletionTokens());
-            uv.setTotalTokens(usage.getTotalTokens());
+            uv.setPromptTokens(usage.getPromptTokens() != null ? usage.getPromptTokens().intValue() : 0);
+            uv.setCompletionTokens(usage.getCompletionTokens() != null ? usage.getCompletionTokens().intValue() : 0);
+            uv.setTotalTokens(usage.getTotalTokens() != null ? usage.getTotalTokens().intValue() : 0);
             vo.setUsage(uv);
         }
         return vo;
     }
 
-    /**
-     * P4 Step 11:同步路径下,assistant 回复触发了 tool_calls 时,把列表一并带到 VO;
-     * 流式路径(暂无 sendMessage 调用方)暂未触发此路径。
-     */
-    private MessageVo toMessageVo(AiMessage msg, ChatUsage usage, java.util.List<ToolCall> toolCalls) {
-        MessageVo vo = toMessageVo(msg, usage);
-        vo.setToolCalls(toolCalls);
-        return vo;
-    }
-
-    // 重载:接受 AiMessageUsage 实体
+    /** 兼容旧调用(从 DB 加载 usage 实体的路径) */
     private MessageVo toMessageVo(AiMessage msg, AiMessageUsage usage) {
         MessageVo vo = new MessageVo();
         vo.setId(msg.getId());
@@ -348,10 +345,7 @@ public class ConversationService {
     }
 
     /**
-     * P5 Step 8:粗估输入 token 数,用于配额预检(在 LLM 调用之前判断是否可能超限)。
-     *
-     * <p>经验值:中文 1 字 ≈ 1.5 token,英文 1 词 ≈ 1.3 token。
-     * 简化为 {@code 字符数 / 2 + 16}(16 为 system message 固定开销)。
+     * P5 Step 8:粗估输入 token 数,用于配额预检。
      */
     private long estimateTokens(String text) {
         if (text == null || text.isEmpty()) return 16;

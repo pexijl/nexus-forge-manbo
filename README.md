@@ -2,7 +2,16 @@
 
 一个基于 **Java 26 + Spring Boot 4** 与 **Vue 3** 的全栈应用骨架,按业务能力拆分为 Gradle 多模块项目。
 
-> 当前进度: `auth` / `user` / `file` / `core` / `ai` 五个后端模块均已实现; `core` 提供了限流、幂等、请求日志等基础设施; 前端已补齐布局骨架与个人中心页; 接入 Swagger UI 在线文档; `user` 模块已有单元测试覆盖; 认证侧已落地 Token 双轨制(access + refresh)与 Redis 黑名单精确吊销; Docker 编排覆盖 PostgreSQL / Redis / 对象存储(MinIO + RustFS)四栈; **AI 网关已落地 P1–P5(同步 / 流式 / 工具调用 / 偏好解析 / 限流 / 配额 / 用量埋点),`nexus-forge-ai` 不再是 stub**。
+> 当前进度(2026-09-02): 后端 5 个业务模块(`auth` / `user` / `file` / `ai`) + 2 个基础设施(`common` / `core`)全部就绪。核心闭环:
+> - **认证**:Token 双轨制(access + refresh) + Redis 黑名单精确吊销 + 密码重置(邮箱验证码) + 角色从 Redis 读(避免 token 膨胀)
+> - **用户**:注册 / 登录 / 资料 / 头像 / 改密 + 账号生命周期(封禁 / 注销 / 恢复 + PII 不可逆擦除 + GDPR 跨模块真删)
+> - **文件**:S3 兼容(MinIO / RustFS / 阿里云 OSS / 腾讯云 COS / AWS)+ `file_metadata` 落库 + 软删 + 管理员视图
+> - **基础设施**:`@Idempotent` / `@RateLimit` / `RequestIdFilter` + WebLog AOP / `GlobalExceptionHandler` / 分布式锁 SPI(Redis 实现)/ `@Audited` HTTP 操作审计
+> - **AI 网关(Phase 0-8 全部完成)**:Spring AI 2.0 官方 starter + 多 vendor(OpenAI / Anthropic / Ollama + DeepSeek + 阿里通义 / 智谱 / MiniMax 等 OpenAI 兼容中转);同步 + SSE 流式 + Tool 回路;系统模式 / 用户 BYOK 私 Key / 用户 model alias / 用户代理 / 三态偏好解析;**全部配置 DB 化** — 模型目录(`ai_model_catalog`)/ vendor base_url(`ai_vendor_config`)/ 系统 apiKey(`ai_vendor_config.encrypted_api_key` + AES-256-GCM + fingerprint)/ 降级链策略(`ai_fallback_chain` JSONB)全部支持运行时 admin 改 + 自动热重建;apiKey 轮换审计(`ai_api_key_audit_log` + JSONB GIN 索引,记录谁 / 何时 / 哪个 vendor / 改前改后 fingerprint / 来源 IP);Micrometer 用量 / Caffeine 限流 / 24h 配额 / 对话持久化
+> - **前端**:Vue 3.5 + PrimeVue 5 + Pinia + Axios;布局三栏(顶栏 + 内容 + 侧边抽屉);登录 / 注册 / 个人中心;Token 单飞刷新 + AES 持久化
+> - **文档**:`AGENTS.md` 是项目内事实来源(包含账号生命周期 / 操作审计 / 文件元数据 / 分布式锁 / 密码重置 / AI 网关各 phase 约定 + 关键踩坑);Swagger UI 挂 `/swagger-ui/index.html`;Docker 编排覆盖 PostgreSQL / Redis / RustFS / MinIO 四栈
+>
+> 详见 `docs/ROADMAP.md`(长期 backlog)/ `docs/NEXT-STEPS.md`(近期优先级)。
 
 ---
 
@@ -45,7 +54,7 @@ nexus-forge/
 ├── nexus-forge-auth/         # 认证:Spring Security + JWT(登录 / 注册 / 鉴权)
 ├── nexus-forge-user/         # 用户:实体、注册、资料修改、头像、密码变更(含单元测试)
 ├── nexus-forge-file/         # 文件:对象存储抽象,支持 MinIO / RustFS / 阿里云 OSS / 腾讯云 COS(均走 S3 协议)
-├── nexus-forge-ai/           # AI 网关:ChatModel SPI(OpenAI / OpenAI 兼容基类 / Qwen / DeepSeek / Ollama / Anthropic 全部为完整实现)、LlmClient、对话、限流、配额、用量、个性化偏好、私 Key(详见"AI 网关"章节);Spring Boot 4 `@AutoConfiguration` 通过 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 挂载
+├── nexus-forge-ai/           # AI 网关:Spring AI 2.0 官方 starter 网关(OpenAI / Ollama / Anthropic + OpenAI 协议家族中转站 + DeepSeek 走 OpenAI 兼容 + 国内 LLM 通过 OpenAI 兼容 endpoint 接:阿里通义 qwen / 智谱 GLM / 月之暗面 Kimi / 字节豆包 / 腾讯混元 / 稀宇科技 MiniMax)、LlmClient、对话、限流、配额、用量、个性化偏好、私 Key(详见"AI 网关"章节);Spring Boot 4 `@AutoConfiguration` 通过 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 挂载;`ProviderPropertiesBridge`(`EnvironmentPostProcessor`)统一把 `spring.ai.providers.*` 桥接到 starter namespace,`ChatModelRouter` 通过 aliasing 把 OpenAI 兼容 vendor(deepseek / dashscope / glm / ...)路由到 `openAiChatModel` bean,业务代码零改动。
 ├── nexus-forge-visual/       # 可视化(规划中)
 └── nexus-forge-ui/           # 前端(Vue 3)
 ```
@@ -62,6 +71,30 @@ web ─┬─► auth ─┬─► common
 ```
 
 `common` 是叶子模块,所有业务模块都可依赖它,但不允许反向依赖。
+
+### 已落地的数据库表(`nexus-forge-user/src/main/resources/db/migration/`)
+
+| 迁移文件 | 表 | 用途 |
+|---|---|---|
+| `V20260628_001` | `users.avatar_key` | 头像 S3 key 字段(头像走对象存储) |
+| `V20260720_001` | `ai_conversations` / `ai_messages` / `ai_message_usage` / `ai_global_default` / `user_ai_preference` | AI 起步(对话 / 消息 / 用量窗口化) |
+| `V20260721_001` | `user_plan_quota_override` | 按用户配额覆盖(24h 滑窗) |
+| `V20260801_001` | `ai_global_default` | 单行全局默认,`model='__UNSET__'` 哨兵 |
+| `V20260801_002` | `user_ai_preference` | 按用户偏好 + AES 加密私 Key |
+| `V20260828_001` | `*.deleted_at` | 软删除统一字段 |
+| `V20260829_001` | `account_lifecycle_log` | 账号封禁 / 注销 / 恢复审计(无 FK,合规追溯) |
+| `V20260830_001` | `file_metadata` | 文件元数据(PENDING / ACTIVE / DELETED 三态) |
+| `V20260830_002` | `operation_audit_log` | HTTP 操作审计(15 列 + 3 索引,只追加) |
+| `V20260902_001` | `ai_global_default` 数据修正 | 默认 vendor 从 `qwen` 改为 `deepseek` |
+| `V20260902_002` | `ai_model_catalog` | 模型目录(每个 model 独立元数据 + JSONB capabilities) |
+| `V20260902_003` | `ai_vendor_config` | vendor 启用 / base_url / 模型白名单(DB 化) |
+| `V20260902_004` | `user_ai_proxy` | 按用户代理(vendor + base_url + model) |
+| `V20260902_005` | `user_ai_model_alias` | 按用户 model alias(短名 → 真实 model) |
+| `V20260902_006` | `ai_vendor_config.encrypted_api_key` + `api_key_fingerprint` | 系统 apiKey DB 化(AES-256-GCM) |
+| `V20260902_007` | `ai_fallback_chain` | 降级链策略(JSONB 单行 + 事件驱动) |
+| `V20260902_008` | `ai_api_key_audit_log` | apiKey 轮换审计(4 索引,含 JSONB GIN) |
+
+> Spring Boot 4.1 移除了 `spring-boot-flyway` 自动装配,所有迁移由 `FlywayMigrationRunner`(`nexus-forge-user`,`@Component` + `@PostConstruct`)在 JPA 之前执行,读 `spring.flyway.{enabled, locations, baseline-on-migrate, validate-on-migrate}`;checksum 不匹配自动 `repair()` 后重试。SQL 全部幂等(`IF NOT EXISTS` / `ON CONFLICT DO NOTHING` / `DO $$ ... $$`)。
 
 ---
 
@@ -188,15 +221,28 @@ npm run dev
 | `JWT_SECRET` | JWT 签名密钥(≥32 字节) | **无,必须注入** |
 | `JWT_ACCESS_TTL_MS` | access Token 有效期(毫秒) | `900000`(15 分钟) |
 | `JWT_REFRESH_TTL_MS` | refresh Token 有效期(毫秒) | `604800000`(7 天) |
-| `STORAGE_VENDOR` | 存储后端:`rustfs` / `minio` / `aliyun` / `tencent` | `rustfs` |
+| `STORAGE_VENDOR` | 存储后端:`rustfs` / `minio` / `aliyun` / `tencent` / `aws` | `rustfs` |
 | `RUSTFS_*` | RustFS 连接参数(endpoint / region / access-key / secret-key / bucket / path-style) | dev 默认 `rustfsadmin/rustfsadmin` 仅供本地 |
 | `MINIO_*` | MinIO 连接参数 | dev 默认 `minioadmin/minioadmin` 仅供本地 |
 | `ALIYUN_*` / `TENCENT_*` | 阿里云 OSS / 腾讯云 COS | 留空,按需填写 |
-| `SPRING_AI_ENABLED` | 总开关,`false` 时 AI 模块所有 Bean 不注册 | `true` |
+| `SPRING_AI_ENABLED` | AI 总开关,`false` 时所有 AI bean 不注册 | `true` |
+| `SPRING_AI_DEFAULT_VENDOR` | 根级默认 vendor(运行期被 `ai_global_default` 表覆盖) | 留空,走表 |
 | `SPRING_AI_PREFERENCE_MASTER_KEY` | 用户私 Key(AES-256-GCM)加密主密钥,base64,推荐 ≥32 字节 | **无,留空时降级用 `JWT_SECRET` 派生**(dev OK,**生产建议显式配置独立密钥**) |
-| `SPRING_AI_DEFAULT_VENDOR` | 默认 vendor | `qwen` |
-| `SPRING_AI_QWEN_DEFAULT_MODEL` | `qwen` vendor 注册期兜底 default-model(运行期被 `ai_global_default` 表覆盖) | `qwen-turbo` |
-| `DASHSCOPE_API_KEY` | 阿里云百炼(DashScope OpenAI 兼容)系统 Key | dev 留空 |
+| `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` | OpenAI / DeepSeek 系统 apiKey(DeepSeek 走 OpenAI 协议复用) | dev 留空 |
+| `ANTHROPIC_API_KEY` | Anthropic(独立 Messages 协议,Phase 5 起已接通 starter,默认未启用) | dev 留空 |
+| `OLLAMA_BASE_URL` | Ollama 本地推理 base URL | `http://localhost:11434/v1` |
+| `DASHSCOPE_API_KEY` | 阿里通义 qwen(OpenAI 兼容)系统 apiKey | dev 留空 |
+| `GLM_API_KEY` | 智谱 GLM(OpenAI 兼容)系统 apiKey | dev 留空 |
+| `MINIMAX_API_KEY` / `MINIMAX_BASE_URL` | MiniMax(M2/M3)系统 apiKey / base URL | 留空 / `https://api.minimax.chat/v1` |
+| `SPRING_AI_QUOTA_ENABLED` | AI 24h token / request 配额总开关 | `true` |
+| `SPRING_AI_RATE_LIMIT_ENABLED` | AI 秒级限流(Caffeine)总开关 | `true` |
+| `MAIL_MODE` | 邮件模式:`logging`(默认,落 `build/dev-mail/*.eml`)/ `smtp`(走 `spring.mail.*`) | `logging` |
+| `MAIL_FROM` | 邮件发件人 | `Nexus Forge <no-reply@nexus-forge.local>` |
+| `PWD_RESET_CODE_TTL` | 密码重置验证码 TTL(秒) | `300` |
+| `PWD_RESET_MAX_ATTEMPTS` | 验证码最大错误次数 | `5` |
+| `PWD_RESET_RATE_WINDOW` / `PWD_RESET_RATE_EMAIL` / `PWD_RESET_RATE_IP` | 限流窗口 / 邮箱次数 / IP 次数 | `60s` / `1` / `3` |
+
+> **vendor apiKey 优先级**: Phase 6 起 vendor 的系统 apiKey **优先**从 DB(`ai_vendor_config.encrypted_api_key`)读;只在 DB 缺值时回退到 yaml / env var 兜底。生产部署**强烈建议**用 admin API 写入(`PUT /api/admin/ai/vendors/{vendor}/api-key`)并禁用 yaml 兜底。轮换全留审计,见 `ai_api_key_audit_log`。
 
 ### 生产环境
 
@@ -241,6 +287,8 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 - `UserPrincipal` — `record(userId, username)`,作为 `Authentication.principal` 在 `SecurityContext` 中传递
 - Token 双轨制:access 走业务接口,refresh 走刷新接口;`typ` 字段区分,防 refresh 滥用
 - Redis 黑名单(`auth:blacklist:{jti}`)+ refresh 版本号(`auth:refresh:{userId}`),精确吊销与单点登录
+- **角色从 Redis 读**:`JwtAuthenticationFilter` → `UserRoleProvider`(`auth:roles:{userId}`,TTL 5min,evict 在角色变更后)→ `SecurityContext` 的 `GrantedAuthority` 全部加 `ROLE_` 前缀;**避免 token 膨胀,角色变更后只需 evict 缓存,不用重发 token**
+- **密码重置**:`POST /api/auth/password/reset/request` 提交邮箱 + `POST /api/auth/password/reset/confirm` 邮箱 + 6 位验证码 + 新密码;`pwd:reset:*` Redis 命名空间(code hash 不存明文,attempts 超限自动清,邮箱 60s/IP 60s 限流);改密后只踢 refresh(`authService.logoutAllRefreshTokens`);错误码 `2013` / `2014` / `2015` / `2016`
 
 ### 用户(`nexus-forge-user`)
 
@@ -251,6 +299,13 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 - `POST /api/users/me/avatar` — 上传头像(对接文件模块,自动清理旧文件)
 - `DELETE /api/users/me/avatar` — 删除头像(恢复默认)
 - 单元测试:注册、更新资料、修改密码 三个 Service 核心路径覆盖
+- **账号生命周期**:`AccountLifecycleService` 集中封禁 / 注销 / 恢复流程
+  - `POST /api/users/me/delete/request` 申请注销(发邮件验证码) / `POST /api/users/me/delete/confirm` 校验 + 真删 / `POST /api/users/me/restore` 一次性 token(14 天)恢复
+  - `POST /api/admin/users/{id}/ban` / `POST /api/admin/users/{id}/unban`(`@PreAuthorize("hasRole('ADMIN')")`)
+  - `GET /api/admin/users/{id}/lifecycle` / `GET /api/admin/users/lifecycle?action=BAN` 分页审计
+  - `AccountAnonymizer` 注销时 PII 不可逆擦除:`username → deleted-{id}`、`email → deleted-{id}@deleted.local`、`password → bcrypt(random UUID)`、`status → BANNED`(防旧 refresh)、`deleted_at` 由 `@SQLDelete` 写
+  - `UserDataDeletionEvent` 解耦跨模块真删,`AiUserDataDeletionListener` / `FileUserDataDeletionListener` 真删业务数据(GDPR 闭环)
+  - `account_lifecycle_log` 表无 FK 到 `users.id` — 真删 users 时审计必须保留(合规追溯)
 
 ### 文件(`nexus-forge-file`)
 - `StorageProvider` — 统一存储接口(upload / download / delete / presignedUrl / exists)
@@ -259,6 +314,7 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 - `FileController` — 单/多文件上传、下载、删除、批量删除、预签名 URL(PUT/GET)、分片上传(初始化 / 预签名分片 / 完成合并)
 - `FileService` — 文件业务逻辑(命名策略、类型过滤)
 - `FileClientImpl` — 业务侧门面(供用户头像等场景调用)
+- **文件元数据落库**:`file_metadata` 表(PENDING / ACTIVE / DELETED 三态)+ `FileEntity` + `FileMetadataRepository`;`/upload` / `/upload-legacy` / `/confirm/{key}` / `/mine` / `/{id}` / `DELETE /{id}` / `/admin?ownerId=&biz=&status=` + admin `@PreAuthorize`;`@SQLDelete` 直接放 `@Entity` 上(不靠 BaseEntity 继承);GDPR 真删走 `FileUserDataDeletionListener` 监听 `UserDataDeletionEvent` 物理删 DB + 清对象存储
 
 ### 核心基础设施(`nexus-forge-core`)
 
@@ -266,7 +322,9 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 - **幂等**: `@Idempotent` 注解 + SpEL key + Redis SET NX EX + SHA-256 哈希
 - **请求日志**: `RequestIdFilter` 生成 `X-Trace-Id` 写入 MDC,记录访问日志
 - **Web 日志 AOP**: `WebLogAspect` 记录 Controller 执行耗时
-- **全局异常处理**: `GlobalExceptionHandler` 统一拦截业务异常、校验异常、404、文件过大、通用错误
+- **全局异常处理**: `GlobalExceptionHandler` 统一拦截业务异常、校验异常、404、文件过大、通用错误;`AccessDeniedException` → 403 + 1005 FORBIDDEN
+- **分布式锁 SPI**:`DistributedLock` + `RedisDistributedLock` + `DistributedLockTemplate`(三层 API:tryLock / tryLockOrThrow / tryLockWithWait / lock / runWithLock);Redis `SET key token NX PX` + Lua 比对 + DEL 保证原子;`lease` 必填防 deadlock;已用于 `FileService.uploadByBiz`(防并发上传)/ `AccountLifecycleService.requestDeletion`(防同 user 重复申请)
+- **HTTP 操作审计**:`@Audited` 注解 + `AuditAspect` AOP 切面 + `operation_audit_log` 表(15 列 + 3 索引,只追加,合规追溯);`/api/admin/audit-logs?userId=&action=&resource=&page=&size=` 多维过滤 + 分页;SpEL 求值 `resourceId`(`#userId` / `#principal.userId()`);`recordArgs` 元数据入参落 JSONB(跳过 Object / 集合,防大对象 / 敏感 DTO);切面 `try/finally` 写审计,业务异常原样传播
 
 ### API 文档
 
@@ -278,34 +336,77 @@ prod profile 下**所有凭据字段**(存储 access-key/secret-key、数据库�
 ### 公共(`nexus-forge-common`)
 
 - `Result<T>` — 统一响应包装(`code` / `message` / `data`)
-- `ResultCode` — 业务错误码(`USER_NOT_FOUND`、`USER_ALREADY_EXISTS`、`EMAIL_ALREADY_EXISTS` ...)
+- `PageResult<T>` — 统一分页响应(`records` / `total` / `page` 1-based / `size` / `pages` / `hasNext` / `hasPrevious`);列表接口**统一返** `Result<PageResult<T>>`,不再返 `Result<List<T>>`
+- `ResultCode` — 业务错误码(`USER_NOT_FOUND` / `USER_ALREADY_EXISTS` / `EMAIL_ALREADY_EXISTS` / `LLM_CONFIG_MISSING` / `LLM_MODEL_NOT_FOUND` / `LLM_PROVIDER_ERROR` / `LLM_UPSTREAM_TIMEOUT` / `LLM_RATE_LIMITED` / `LLM_QUOTA_EXCEEDED` / `LLM_ALL_VENDORS_FAILED` / `LLM_CIRCUIT_OPEN` / `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED` / `LLM_MODEL_ALIAS_NOT_FOUND` / `RESET_CODE_*` ...)
 - `Role` — `USER` / `ADMIN`,内置 Spring Security `authority`
-- `UserStatus` — 用户状态枚举
-- `BaseEntity` — 实体基类(`createdAt` / `updatedAt`)
+- `UserStatus` — 用户状态枚举(`ACTIVE` / `DISABLED` / `BANNED`;`DELETED` 已 `@Deprecated`,由 `deleted_at` 取代)
+- `BaseEntity` — 实体基类(`createdAt` / `updatedAt` UTC + `deletedAt` 软删字段);`@SQLDelete` / `@SQLRestriction` **必须**直接放 `@Entity` 上(Hibernate 6/7 不从 `@MappedSuperclass` 继承语义)
 - 异常体系:`BaseException` → `BusinessException` / `AuthException` / `LlmException`(AI 网关专用),由 `GlobalExceptionHandler` 统一处理
-- AI 网关错误码同处 `ResultCode`(`LLM_CONFIG_MISSING` / `LLM_MODEL_NOT_FOUND` / `LLM_PROVIDER_ERROR` / `LLM_UPSTREAM_TIMEOUT` / `LLM_RATE_LIMITED` / `LLM_QUOTA_EXCEEDED` / `LLM_ALL_VENDORS_FAILED` / `LLM_CIRCUIT_OPEN` / `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED`)
 - 文件 DTO: `FileClient` / `FileMeta` / `FileBizType` / `FileAccess` / `UploadCredential`
+- 事件: `UserBannedEvent` / `UserDataDeletionEvent`(跨模块真删事件,解耦 user 与 file / ai)
+- 通用审计接口: `com.nexusforge.audit.AuditEvent<A>` + `AuditLogger<A>`(当前实现 `AccountLifecycleAuditLogger` 写 `account_lifecycle_log`;后续模块可加自己的实现)
 
 ### AI 网关(`nexus-forge-ai`)
 
-- **`ChatModel` SPI** + 6 vendor:`OpenAiChatModel`(OpenAI 官方) + `OpenAiCompatibleChatModel` 基类(子类:`QwenChatModel` DashScope OpenAI 兼容 / `DeepSeekChatModel` / `OllamaChatModel`) + `AnthropicChatModel`(**完整实现**,独立协议,位于 `provider/anthropic/`,含 `AnthropicJsonMapper` 请求映射 + `AnthropicMessagesStreamParser` SSE 解析)。**所有 OpenAI 兼容厂商放在 `provider/openai/` 一个目录**(按协议家族分组,不是按 vendor),非 OpenAI 协议单独建子目录
-- **`LlmClient` 门面**:`call(req)` / `call(req, vendor, model)` / `stream(req)` / `stream(req, vendor, model)` / `callWithToolLoop(...)`(工具调用闭环,见下)。系统模式走 `ChatModelRouter` 降级链 + 熔断;私 Key 模式绕过降级链、quota、IP 限流
-- **`PreferenceResolver` 三态分流**:`SYSTEM`(全局默认 + 系统 Key) / `USER_OVERRIDE_SYSTEM_KEY`(用户设了 vendor/model 仍用系统 Key) / `USER_PRIVATE_KEY`(用户填私 Key)。优先级链路:请求 model → 用户偏好 → 全局默认 → yaml
-- **`VendorChatModelFactory`**:按 `sha256(apiKey)` 缓存动态构造的 ChatModel,避免重复创建,内部用 `static final` 子类规避 inner-class 限制
-- **`ConversationService`**:`sendMessage` 持久化 user+assistant,首条 user 自动更新对话标题与 model,记录工具调用,落 `ai_message_usage` 用量
-- **Tool Calling / Function Calling 闭环**(P4 Step 12):`ToolRegistry` 注册 `ToolDefinition` 列表,`LlmClient.callWithToolLoop` 检测到 `tool_calls` 后调用工具、把工具结果作为 `role=tool` 消息重入 LLM、直到 LLM 返回 `finish_reason != tool_calls` 或达到最大轮次;`EchoTool` 是默认示例工具;`ToolExecutor` 处理工具调用的异常隔离与超时;`FunctionCallAggregator` 在流式路径上按 `index` 聚合 `delta.tool_calls` 片段,SSE 终止帧一次性吐出完整 `toolCalls[]`
+#### 当前能力全景(Phase 0–8 全部完成)
+
+| 阶段 | 落地能力 |
+|---|---|
+| Phase 0 | `ai_global_default` 单行表 + `__UNSET__` 哨兵,未配置时 `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED (3010)` |
+| Phase 1 | 用户 BYOK `user_ai_preference`(AES-256-GCM)+ `api_key_fingerprint`;`VendorChatModelFactory` 按 `sha256(apiKey)` 缓存动态构造的 `OpenAiChatModel`;Anthropic 私 Key 模式占位 throw `LLM_INVALID_REQUEST` |
+| Phase 2 | 按用户代理 `user_ai_proxy`(vendor + base_url + model),覆盖全局默认 |
+| Phase 3 | 三态偏好解析 `SYSTEM` / `USER_OVERRIDE_SYSTEM_KEY` / `USER_PRIVATE_KEY`,请求 model → 用户偏好 → 全局默认 → yaml 链路 |
+| Phase 4 | 按用户 model alias `user_ai_model_alias`,短名 → 真实 model 解析,`MODEL_ALIAS_NOT_FOUND` 错误码 |
+| Phase 5 | vendor base_url DB 化 `ai_vendor_config`,admin 热改 → `SystemKeyChatModelFactory` 重建 ChatModel + 失效本地缓存 |
+| Phase 6 | vendor 系统 apiKey DB 化 `ai_vendor_config.encrypted_api_key` + fingerprint;yaml 仅做启动兜底;私 Key 路径仍走 `user_ai_preference` |
+| Phase 7 | 降级链策略 DB 化 `ai_fallback_chain` JSONB 单行,事件驱动 `ChatModelRouter` 重载;`isPrimaryVendorOpen` 暂恒 false(Spring AI retry / Resilience4j 留 Phase 5+) |
+| Phase 8 | apiKey 轮换审计 `ai_api_key_audit_log` + JSONB GIN 索引,记录 action / actor / ip / 改前改后 fingerprint;**所有 admin 改 / 清空 vendor 系统 apiKey 必留痕** |
+
+#### 核心组件
+
+- **Spring AI 2.0 官方 starter** 提供 3 个 vendor 的 `ChatModel` bean:`spring-ai-starter-model-openai`(OpenAI 官方 + DeepSeek + 阿里通义 / 智谱 / MiniMax 等 OpenAI 兼容 vendor 复用)/ `spring-ai-starter-model-anthropic` / `spring-ai-starter-model-ollama`。`AiAutoConfiguration.chatModelRouter(Map<String, ChatModel>)` 按 bean 名归一化为小写 vendor 名;`ProviderPropertiesBridge`(`EnvironmentPostProcessor`,`addFirst` 优先级)把 `spring.ai.providers.*` 桥到 `spring.ai.<starter-ns>.*`,`ChatModelRouter` 通过 aliasing 把 OpenAI 兼容 vendor(`deepseek` / `dashscope` / `glm` / `kimi` / `doubao` / `hunyuan` / `siliconflow` / `oneapi` / `openrouter` / `minimax`)路由到 `openAiChatModel` bean — 业务面仍用 vendor 字符串,无感
+- **`LlmClient` 门面**:`call(Prompt)` / `call(Prompt, vendor, model)` / `stream(Prompt)` / `stream(Prompt, vendor, model)`(系统模式) + `call(Prompt, ChatModel)` / `stream(Prompt, ChatModel)`(私 Key 模式,绕过降级链 / quota / IP 限流)。`callWithToolLoop(Prompt, ChatModel)` 内部包 Spring AI `DefaultToolCallingManager` 的 tool 回路
+- **Tool Calling / Function Calling 闭环**:业务侧在 `@Component` 类的 `@Tool` 方法上标注,`AiAutoConfiguration.toolCallbackProvider` 的 `MethodToolCallbackProvider` 自动扫成 `ToolCallback` 列表;`LlmClient` 用 Spring AI `DefaultToolCallingManager` 检测 `AssistantMessage.getToolCalls()`、执行工具、把 `ToolResponseMessage` 重入 Prompt,直到响应不再含 tool_call 或达到 `AiProperties.maxToolTurns` 上限
 - **`RateLimitGuard`**(Caffeine 本地 Token Bucket,user + IP 维度,私 Key 跳 IP;键前缀 `ai:rl:`,与 `core/RateLimitAspect` 的 `rl:` 命名空间隔离)
 - **`QuotaService`**:24h 滑窗 token / request 计数,支持 per-user override,私 Key 跳过平台 quota
-- **`UsageRecorder`** + Micrometer 埋点:`ai.llm.requests` / `ai.llm.tokens.{prompt,completion,total}` 计数器,按 vendor / model / source 维度拆 tag
-- **流式输出**:`AiStreamController` 用 `StreamingResponseBody`(避开 Spring 7 + Tomcat 11 的 chunked transfer encoding EOF 问题;**不要**用 `SseEmitter`)。`writeChunks` 用单次 `Flux.subscribe` + `CountDownLatch.await` 防止 cold-Flux 双重订阅(否则会发 2 次 LLM HTTP 请求)。SSE wire 格式是 flat camelCase `ChatChunk` JSON 帧(`data: <json>\n\n`),**不是** OpenAI `chat.completion.chunk`(无 `choices[]`、无 `data: [DONE]`、无 `object`/`created`/`model` 字段);错误帧 `{"error": "..."}`;流结束靠 socket 关闭
-- **REST 接口**:
-  - `POST /api/ai/chat`(同步)
-  - `POST /api/ai/chat/stream`(SSE,**注意是 `/chat/stream`,不是 `/stream`**)
-  - `POST /api/ai/conversations`(创建) / `GET /api/ai/conversations`(列表) / `GET /api/ai/conversations/{id}`(对话详情 VO `ConversationDetailVo`,**消息列表在该 VO 内**,没有单独的 `GET /{id}/messages`) / `POST /api/ai/conversations/{id}/messages`(发送消息,触发 LLM 调用) / `DELETE /api/ai/conversations/{id}`
-  - `GET /api/ai/preference` / `PUT /api/ai/preference` / `DELETE /api/ai/preference`(用户偏好;vendor/model 可选 + 私 Key 明文加密入库)
-  - `GET /api/admin/ai/global-default` / `PUT /api/admin/ai/global-default`(`@PreAuthorize("hasRole('ADMIN')")`)
-  - `GET /api/ai/usage`(24h 用量摘要,`AiUsageController`)
-- **首次启动行为**:`ai_global_default.model` 种子为 `'__UNSET__'`(sentinel),所有 system-mode 请求返回 `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED (3010)`,直到 admin 调 `PUT /api/admin/ai/global-default` 设置真值
+- **`UsageRecorder`** + Micrometer 埋点:`ai.chat.requests` / `ai.chat.tokens.{prompt,completion,total}` 计数器,按 model + source(platform / private)维度拆 tag
+- **DTO 走 Spring AI**:前端的 `ChatRequestDto.messages` 是 `List<Message>`(Jackson + Spring AI `MessageTypeDeserializer` 按 role 字段多态反序列化),服务端返 `Result<ChatResponse>`(Spring AI 类型)。客户端 wire 格式跟 OpenAI Chat Completions 一致
+- **sprint-ai-full-migration 已删**:`com.nexusforge.ai.*` 9 个旧 chat DTO(`ChatMessage` / `ChatRequest` / `ChatResponse` / `ChatChunk` / `ChatUsage` / `DeltaToolCall` / `ToolCall` / `ToolDefinition` / `Role`)、`com.nexusforge.model.{ChatModel,ChatCapabilities}` SPI、所有自实现 provider(`OpenAiChatModel` / `OpenAiCompatibleChatModel` / `QwenChatModel` / `DeepSeekChatModel` / `OllamaChatModel` / `AnthropicChatModel` 等)、`OpenAiJsonMapper` / `AnthropicJsonMapper` / `OpenAiStreamParser` / `AnthropicMessagesStreamParser`、`ChatModelHttpSupport` / `CircuitState`、`ToolRegistry` / `ToolExecutor` / `ToolResult` / `FunctionCallAggregator`、SSE helper(`SseEventCodec` / `SseFormat`)—所有这些已被 Spring AI 官方实现替代
+- **流式输出**:`AiStreamController` 用 `StreamingResponseBody`(避开 Spring 7 + Tomcat 11 的 chunked transfer encoding EOF 问题;**不要**用 `SseEmitter`)。`writeChunks` 用单次 `Flux.subscribe` + `CountDownLatch.await` 防止 cold-Flux 双重订阅(否则会发 2 次 LLM HTTP 请求)。SSE wire 格式是 Spring AI `ChatResponse` 的 Jackson 序列化结果(每帧 `data: <json>\n\n`),字段路径跟 OpenAI `chat.completion.chunk` 兼容;错误帧 `{"error": "..."}`;流结束靠 socket 关闭(无 `data: [DONE]` 哨兵)
+- **首启必走 admin 初始化**:`ai_global_default.model` 种子为 `'__UNSET__'`(sentinel),所有 system-mode 请求返回 `LLM_GLOBAL_DEFAULT_NOT_CONFIGURED (3010)`,直到 admin 调 `PUT /api/admin/ai/global-default` 设置真值
+
+#### REST 端点(全部清单)
+
+业务面(登录用户即可访问):
+
+| Method | Path | 用途 |
+|---|---|---|
+| `POST` | `/api/ai/chat` | 同步对话 |
+| `POST` | `/api/ai/chat/stream` | SSE 流式(**注意是 `/chat/stream`,不是 `/stream`**) |
+| `POST` | `/api/ai/conversations` | 创建对话 |
+| `GET` | `/api/ai/conversations` | 对话列表(分页) |
+| `GET` | `/api/ai/conversations/{id}` | 对话详情 `ConversationDetailVo`,**消息列表在该 VO 内** |
+| `POST` | `/api/ai/conversations/{id}/messages` | 发送消息,触发 LLM 调用 |
+| `PATCH` | `/api/ai/conversations/{id}` | 改标题 / pin |
+| `DELETE` | `/api/ai/conversations/{id}` | 软删对话 |
+| `GET` | `/api/ai/preference` / `PUT` / `DELETE` | 用户偏好(私 Key 明文入库,AES-256-GCM 加密) |
+| `GET` / `PUT` / `DELETE` | `/api/ai/proxy` | 用户代理 |
+| `GET` / `POST` / `PUT` / `DELETE` | `/api/ai/aliases` | 用户 model alias |
+| `GET` | `/api/ai/usage` | 24h 用量摘要 |
+| `GET` | `/api/ai/models` | 公开模型目录(按用户可见 vendor 过滤) |
+
+管理端(`@PreAuthorize("hasRole('ADMIN')")`):
+
+| Method | Path | 用途 |
+|---|---|---|
+| `GET` / `PUT` | `/api/admin/ai/global-default` | 全局默认 vendor / model |
+| `GET` / `POST` / `PUT` / `DELETE` | `/api/admin/ai/models` | 模型目录 CRUD |
+| `GET` / `POST` / `PUT` / `DELETE` | `/api/admin/ai/vendors` | vendor 配置 CRUD(启用 / 停用 / base_url / 模型白名单) |
+| `GET` / `PUT` / `DELETE` | `/api/admin/ai/vendors/{vendor}/api-key` | vendor 系统 apiKey(改 / 清空,**必写审计**) |
+| `GET` / `PUT` / `DELETE` | `/api/admin/ai/fallback-chain` | 降级链策略(整链 JSONB) |
+| `GET` | `/api/admin/ai/vendors/{vendor}/api-key-audit?page=&size=` | 某 vendor 的 apiKey 轮换审计 |
+| `GET` | `/api/admin/ai/api-key-audit?page=&size=` | 全表分页审计 |
+| `GET` | `/api/admin/audit-logs` | HTTP 操作审计(`@Audited` 落 `operation_audit_log`,跨模块) |
 
 ### AI 数据库迁移(`nexus-forge-user` Flyway)
 
@@ -313,9 +414,18 @@ Spring Boot 4.1 已移除 `spring-boot-flyway` 自动装配;`FlywayMigrationRunn
 
 AI 相关表(在 `nexus-forge-user/src/main/resources/db/migration/`):
 
-- `V20260801_001__add_ai_global_default.sql` — `ai_global_default` 单行表(`id=1 CHECK (id=1)`,`model='__UNSET__'` 种子)
-- `V20260801_002__add_user_ai_preference.sql` — `user_ai_preference` per-user 表,`encrypted_api_key BYTEA`(AES-256-GCM 密文)+ `api_key_fingerprint VARCHAR(16)`(明文 Key 指纹展示)
-- 老 SQL 加 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` / `DO $$ ... $$` 包装,容忍 JPA `ddl-auto=update` 已经建过表的现状
+- `V20260801_001__add_ai_global_default.sql` — `ai_global_default` 单行表(`id=1 CHECK (id=1)`,`model='__UNSET__'` 种子)— Phase 0
+- `V20260801_002__add_user_ai_preference.sql` — `user_ai_preference` per-user 表,`encrypted_api_key BYTEA`(AES-256-GCM 密文)+ `api_key_fingerprint VARCHAR(16)`(明文 Key 指纹展示)— Phase 1
+- `V20260902_001__remove_qwen_default_vendor.sql` — `ai_global_default` 默认 vendor 从 `qwen` 改为 `deepseek`(DeepSeek 走 OpenAI 协议)
+- `V20260902_002__add_ai_model_catalog.sql` — `ai_model_catalog` 模型目录(JSONB capabilities)— Phase 5+
+- `V20260902_003__add_ai_vendor_config.sql` — `ai_vendor_config` vendor 配置(enabled / base_url / 模型白名单)— Phase 5
+- `V20260902_004__add_user_ai_proxy.sql` — `user_ai_proxy` 用户代理 — Phase 2
+- `V20260902_005__add_user_ai_model_alias.sql` — `user_ai_model_alias` 用户 model alias — Phase 4
+- `V20260902_006__add_ai_vendor_config_api_key.sql` — `ai_vendor_config.encrypted_api_key` + `api_key_fingerprint`,系统 apiKey DB 化 — Phase 6
+- `V20260902_007__add_ai_fallback_chain.sql` — `ai_fallback_chain` JSONB 单行,降级链策略 DB 化 — Phase 7
+- `V20260902_008__add_ai_api_key_audit_log.sql` — `ai_api_key_audit_log` apiKey 轮换审计(4 索引,含 `(metadata->>'vendor')` JSONB GIN)— Phase 8
+
+所有 SQL 幂等(`IF NOT EXISTS` / `ON CONFLICT DO NOTHING` / `DO $$ ... $$`),容忍 JPA `ddl-auto` 已建过表的现状。生产 `ddl-auto: validate`;实体字段变更必须与同一提交中的迁移配套,否则生产启动会因列不匹配失败(详见 `AGENTS.md` "Flyway 经验法则")。
 
 ### 前端
 
@@ -349,20 +459,42 @@ AI 相关表(在 `nexus-forge-user/src/main/resources/db/migration/`):
 
 ---
 
-## 待开发
+## 待开发(2026-09-02 状态)
 
+> 与 `docs/ROADMAP.md`(长期 backlog)/ `docs/NEXT-STEPS.md`(近期优先级)联动;此段做"高优待办"摘要,详情见那两个文件。
 
-- [x] `nexus-forge-ai`:LLM 调用网关、流式响应 — 见"AI 网关"章节
-- [ ] `nexus-forge-ai`:向量检索 / RAG(Function Calling 已落地,工具执行 + 重入 LLM 在 Step 12+ 跟进)
-- [ ] `nexus-forge-visual`:图表 / 看板 / 大屏组件
-- [x] 后端:Token 刷新(`POST /auth/refresh`)、登出黑名单 — `6e43be9`
-- [ ] 后端:`JwtAuthenticationFilter` 改为从 Redis 读权限(避免 Token 膨胀,当前角色直接写 claims)
-- [ ] 后端:密码重置(邮箱验证码)、第三方登录
-- [ ] 前端:业务首页(`/home`)真实数据、权限路由(基于 Role)
-- [ ] 前端:i18n 国际化(中文 / 英文)
-- [x] 集成测试:auth + user + file + ai 端到端 — 13 个 IT 文件已落地于 `nexus-forge-web/src/test/java/com/nexusforge/flows/`(`AuthRegisterLoginIT` / `AuthRefreshIT` / `UserProfileIT` / `FileUploadIT` / `AiChatIT` / `AiStreamIT` / `AiQuotaIT` / `AiRateLimitIT` / `FallbackIT` / `ConversationIT` / `UsageEndpointIT` / `ApplicationMetricsIT` / `HealthIT`)
-- [x] Docker Compose 一键起 PostgreSQL / Redis — `e35aa5a` / `1c7721c`(对象存储:`docker/MinIO`、`docker/RustFS`)
-- [x] GitHub Actions CI — `.github/workflows/ci.yml` 后端 `./gradlew --no-daemon clean build` + 前端 `npm install --no-audit --no-fund && npm run lint && npm run build`(lint `continue-on-error: true`,待现有错误清零后再移除)
+### 后端 AI 网关(Phase 0–8 全部完成,Phase 9+ 候选)
+
+- [x] **Phase 0–8 全部完成** — 模型目录 / vendor base_url / 用户 BYOK / 用户 model alias / 用户代理 / 系统 apiKey DB 化 / 降级链 DB 化 / apiKey 轮换审计 全部 DB 化 + 事件驱动热重建 / 审计
+- [ ] `nexus-forge-ai`:向量检索 / RAG(embedding + 向量库,留作长期项)
+- [ ] `nexus-forge-ai`:Anthropic 私 Key 模式(`VendorChatModelFactory` 当前显式 throw `LLM_INVALID_REQUEST`)
+- [ ] `nexus-forge-ai`:admin UI 集成 apiKey 轮换审计 + 全局默认 + 模型目录 + vendor 配置
+- [ ] `nexus-forge-ai`:Redis pub/sub 跨实例 vendor config / fallback chain 热失效(当前每实例本地缓存)
+- [ ] `nexus-forge-ai`:`X-Forwarded-For` 解析(反代部署场景,Phase 8 暂拿连接 IP)
+
+### 后端基础设施
+
+- [x] `@Idempotent` / `@RateLimit` / `RequestIdFilter` / `WebLogAspect` / `GlobalExceptionHandler`
+- [x] 分布式锁 SPI(`DistributedLock` + `RedisDistributedLock` + `DistributedLockTemplate`)— 已用于 `FileService.uploadByBiz` / `AccountLifecycleService.requestDeletion`
+- [x] HTTP 操作审计(`@Audited` + `AuditAspect` + `operation_audit_log`,`/api/admin/audit-logs` 分页查询)— 已应用 user.update / user.password.change / user.avatar.remove / file.upload / file.delete
+- [x] 账号生命周期(`AccountLifecycleService` + PII 不可逆擦除 + GDPR 跨模块真删)— `/api/users/me/delete/{request,confirm,restore}` + `/api/admin/users/{id}/{ban,unban,lifecycle}`
+- [x] 密码重置(`/api/auth/password/reset/{request,confirm}` 邮箱验证码 + 限流)
+- [x] 角色从 Redis 读(`JwtAuthenticationFilter` + `UserRoleProvider` + `auth:roles:*`,避免 token 膨胀)
+
+### 前端
+
+- [x] 应用骨架 + 布局三栏(顶栏 + 侧边抽屉 + 内容区) + 个人中心 4 面板 + Axios 拦截器 + Pinia AES 持久化
+- [ ] 路由级权限守卫(基于 `Role` 过滤菜单)— `Role` 数据已就位,前端 router 守卫待补
+- [ ] 业务首页(`/home`)真实数据 — 当前为占位
+- [ ] AI 业务页(聊天 / 偏好 / 管理员)— `src/api/` 当前只有 `auth.ts` / `user.ts`,**AI 网关能力已就绪,前端一行都没用**
+- [ ] i18n 国际化(中文 / 英文)
+
+### 测试 / CI / 部署
+
+- [x] 后端单测 381 case(8 预存失败,7 个 `AiMessageUsageRepositoryTest` 需真实 DB + 1 个 `ConversationServiceTest` Spring AI 2.0 metadata 假设,与本路线无关)
+- [x] 集成测试 13 IT(端到端覆盖 auth / user / file / ai,Testcontainers 真 PG / Redis / RustFS)
+- [x] Docker Compose 一键起 PostgreSQL / Redis / RustFS / MinIO — `docker/{Postgres,Redis,RustFS,MinIO}`
+- [x] GitHub Actions CI — `.github/workflows/ci.yml`(lint `continue-on-error: true` 待现有错误清零后移除)
 
 ---
 

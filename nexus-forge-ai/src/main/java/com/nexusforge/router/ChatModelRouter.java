@@ -1,127 +1,152 @@
 package com.nexusforge.router;
 
-import com.nexusforge.ai.ChatRequest;
+import com.nexusforge.ai.service.FallbackChainService;
 import com.nexusforge.config.AiProperties;
+import com.nexusforge.config.AiProperties.Provider;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.exception.LlmException;
-import com.nexusforge.model.ChatModel;
-import com.nexusforge.provider.support.ChatModelHttpSupport;
-import org.springframework.stereotype.Component;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.Prompt;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * 大模型路由处理器
- * 根据 ChatRequest 中传入的 model 字段匹配、选择对应的 ChatModel 实现类
- * 模型名称解析命名约定：
- * <pre>
- *   "openai:gpt-4o-mini"        -> openai 服务商，模型 gpt-4o-mini
- *   "gpt-4o-mini"               -> 使用全局默认服务商(默认 openai)，模型 gpt-4o-mini
- *   "anthropic:claude-3-5-haiku" -> anthropic 服务商，模型 claude-3-5-haiku
- * </pre>
+ * spring-ai-full-migration Phase 2a + DeepSeek 移除 — Spring AI 化 vendor 路由。
  *
- * <p>P4 Step 8 在原有 {@link #resolve(ChatRequest)} 之上新增 {@link #resolveWithFallback(ChatRequest)}:
- * 解析首选 vendor 后,按 {@code spring.ai.fallback-chain} 配置的有序候选 vendor 列表展开成
- * {@link FallbackChain},调用方(通常是 {@code LlmClient})按顺序尝试,遇到
- * {@link #isFallbackTriggering(LlmException, String) 触发降级的错误}或
- * 首选 vendor 当前处于熔断态(由 {@link ChatModelHttpSupport#isVendorOpen(String)} 查询),
- * 自动跳到下一跳。
+ * <p>从 {@code com.nexusforge.model.ChatModel} 切到 Spring AI 的
+ * {@link org.springframework.ai.chat.model.ChatModel},从我们 {@code ChatRequest}
+ * 切到 Spring AI 的 {@link Prompt}。
+ *
+ * <p>核心行为:
+ * <ul>
+ *   <li>vendor 名 → ChatModel 索引</li>
+ *   <li><b>OpenAI 兼容 vendor aliasing</b>:yaml 配的 vendor key(如
+ *       {@code deepseek} / {@code dashscope} / {@code glm} / ...),如果
+ *       没有自己的 ChatModel bean,会按 protocol 推断别名到对应 starter 的
+ *       ChatModel bean(详见 {@link #aliasOpenAiCompatibleVendors})。这是
+ *       DeepSeek 改走 OpenAI starter(commit 1)的关键支撑 — yaml 里继续用
+ *       {@code providers.deepseek.*} 配置,运行时 vendor="deepseek" 自动
+ *       路由到 openAiChatModel bean。</li>
+ *   <li>降级链展开(按 {@code spring.ai.fallback-chain} 顺序)</li>
+ *   <li>熔断查询 — Phase 4 暂时退化为"不查熔断",Phase 5 切到 Spring AI
+ *       原生重试 / Resilience4j 时再补</li>
+ *   <li>"触发降级"的错误码白名单(LLM_PROVIDER_ERROR / LLM_UPSTREAM_TIMEOUT)</li>
+ * </ul>
  */
+@Slf4j
 public class ChatModelRouter {
 
     /**
-     * 所有已加载的大模型SPI实现映射
-     * key：服务商名称（ChatModel#name() 返回值），value：对应服务商ChatModel实现实例
+     * 所有已加载的 Spring AI 大模型 bean(含 aliasing 后的别名条目)。
+     * key:vendor 名(小写,如 {@code openai} / {@code deepseek}),value:Spring AI 的 ChatModel 实例。
+     *
+     * <p>Phase 5 起:ctor 接 {@code Map<String, ChatModel>}(key 是 Spring bean 名,
+     * 如 {@code openAiChatModel}),构造时通过 {@link #normalizeBeanName} 归一化为
+     * 小写 vendor 名。Spring AI 官方 starter 的 bean 名遵循 {@code <vendor>ChatModel}
+     * 命名(OpenAI/Anthropic/Ollama 是 camelCase),所以归一化逻辑就是"剥
+     * {@code ChatModel} 后缀 + 转小写"。
+     *
+     * <p>DeepSeek 移除 starter 后,Spring 容器只注入 3 个 ChatModel bean
+     * ({@code openAiChatModel} / {@code anthropicChatModel} / {@code ollamaChatModel})。
+     * 但 yaml 的 {@code providers.deepseek.*} 仍可正常配置,Phase 5 commit 后续的
+     * {@code aliasOpenAiCompatibleVendors} 把 "deepseek" vendor key 别名到
+     * openAiChatModel bean,业务面无感。
      */
     private final Map<String, ChatModel> models;
 
-    /**
-     * AI全局配置属性，读取默认厂商、默认模型、各服务商配置开关
-     */
+    /** AI 全局配置(yaml 的 defaultVendor / providers[vendor].defaultModel 等) */
     private final AiProperties props;
 
     /**
-     * HTTP 支持(熔断状态查询)。{@link #resolveWithFallback(ChatRequest)} 通过它判断
-     * 首选 vendor 是否已经熔断。null 时降级为"不检查熔断"。
+     * Phase 7 — 降级链数据源。读 DB → yaml 兜底;admin 改完立即生效(走事件 + cache 失效)。
+     * 替代原先直接读 {@code props.getFallbackChain()},让 fallback chain 也能热改。
      */
-    private final ChatModelHttpSupport http;
+    private final FallbackChainService fallbackChainService;
 
-    /**
-     * 兼容性 2 参构造:供现有测试 {@code new ChatModelRouter(models, props)} 使用。
-     * 实际效果等价于 {@code new ChatModelRouter(models, props, null)}。
-     */
-    public ChatModelRouter(Map<String, ChatModel> models, AiProperties props) {
-        this(models, props, null);
-    }
-
-    /**
-     * P4 构造:完整参数。{@code http} 为 null 时{@link #resolveWithFallback(ChatRequest)}
-     * 退化为"不检查熔断,只看异常码"。
-     */
-    public ChatModelRouter(Map<String, ChatModel> models,
+    public ChatModelRouter(Map<String, ChatModel> modelsByBeanName,
                            AiProperties props,
-                           ChatModelHttpSupport http) {
-        this.models = models;
+                           FallbackChainService fallbackChainService) {
         this.props = props;
-        this.http = http;
+        this.fallbackChainService = fallbackChainService;
+        this.models = new HashMap<>();
+        for (Map.Entry<String, ChatModel> e : modelsByBeanName.entrySet()) {
+            this.models.put(normalizeBeanName(e.getKey()), e.getValue());
+        }
+        // Phase 5 + DeepSeek 移除:OpenAI 兼容 vendor aliasing
+        // yaml 配 deepseek / dashscope / glm / ... 等 OpenAI 兼容 vendor,实际
+        // 只在 spring-ai-starter-model-openai starter 装配出一个 openAiChatModel
+        // bean — 这里把所有 enabled 且走 OPENAI 协议的 vendor key 别名到该 bean。
+        aliasOpenAiCompatibleVendors();
+    }
+
+    /** 当前路由能看到的 vendor 名集合(不可变,小写)。启动日志 / 调试用。 */
+    public java.util.Set<String> vendorNames() {
+        return java.util.Collections.unmodifiableSet(models.keySet());
     }
 
     /**
-     * 对外入口方法：解析请求中的模型标识，路由匹配对应服务商与有效模型名
-     * @param request 对话请求对象，携带原始model标识
-     * @return 路由解析结果，包含模型实现、服务商、最终生效模型名
+     * Spring bean 名 → 内部 vendor 名。{@code openAiChatModel → openai} /
+     * {@code deepSeekChatModel → deepseek} / {@code ollamaChatModel → ollama} /
+     * {@code anthropicChatModel → anthropic}。
      */
-    public Resolved resolve(ChatRequest request) {
-        // 请求为空 / model字段为空空白，使用全局默认厂商+全局默认模型
-        if (request == null || request.getModel() == null || request.getModel().isBlank()) {
-            return resolveInternal(props.getDefaultVendor(), props.getDefaultModel());
+    private static String normalizeBeanName(String beanName) {
+        if (beanName == null) return "";
+        if (beanName.endsWith("ChatModel")) {
+            beanName = beanName.substring(0, beanName.length() - "ChatModel".length());
         }
-        String m = request.getModel().trim();
-        // 匹配 "vendor:model" 格式，拆分服务商与模型名称
-        int idx = m.indexOf(':');
-        if (idx > 0) {
-            return resolveInternal(m.substring(0, idx), m.substring(idx + 1));
-        }
-        // 无冒号分隔，使用全局默认服务商，传入值作为模型名
-        return resolveInternal(props.getDefaultVendor(), m);
+        return beanName.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    // ─────────────────────── resolve: 单 hop ───────────────────────
+
+    /**
+     * 把调用方传入的 (vendor, model) 路由到唯一 vendor。vendor / model 任一为
+     * null 或空串时,落到 yaml 的 {@code default-vendor} / 对应 vendor 的
+     * {@code default-model}。
+     *
+     * <p><b>设计要点</b>:vendor 跟 model 不再混在同一个字符串里传。原先
+     * spring-ai-full-migration Phase 2a 用 {@code vendor:model} 拼在
+     * {@code Prompt.getOptions().getModel()} 上让 router 自己反解 —— 问题是
+     * Spring AI 透传该字段给上游 API,DeepSeek / OpenAI / Anthropic 等不认
+     * {@code vendor:model} 这种格式,直接 400 Bad Request。修法是 router 显式
+     * 接 (vendor, model) 两个参数,Prompt 的 model 字段只放纯模型名
+     * (e.g. {@code "deepseek-v4-flash"})。
+     */
+    public Resolved resolve(String vendor, String model) {
+        String v = (vendor == null || vendor.isBlank()) ? props.getDefaultVendor() : vendor;
+        String m = (model == null || model.isBlank()) ? null : model;  // null = 让 resolveInternal 用 defaultModel
+        return resolveInternal(v, m);
     }
 
     /**
-     * 解析首选 + 按 {@code spring.ai.fallback-chain} 展开降级链。
+     * 解析首选 + 按当前生效降级链(DB 或 yaml 兜底)展开降级链。
+     * 链至少 1 项(首选),至多 1 + fallbackChain.size() 项(去重 + 跳过无效 vendor)。
      *
-     * <p>返回的 {@link FallbackChain} 是不可变的快照(构建时已固化为有序 vendor 列表),
-     * 调用方按 {@link FallbackChain#iterator()} 顺序尝试:
-     * <ul>
-     *   <li>链上的第一项 = {@link #resolve(ChatRequest)} 的结果(用户原始请求解析出来的 vendor)</li>
-     *   <li>后续项 = {@code props.fallbackChain} 中排在用户 vendor 之后、且不在首选列表里的 vendor;
-     *       每项都用该 vendor 的 {@link AiProperties.Provider#getDefaultModel()} 作为模型名</li>
-     *   <li>同一 vendor 不会重复出现</li>
-     * </ul>
+     * <p>vendor / model 任一为 null 或空串时,用 yaml 兜底(同
+     * {@link #resolve(String, String)})。
      *
-     * <p>首选 vendor 解析失败({@link ResultCode#LLM_MODEL_NOT_FOUND})直接抛 ——
-     * 用户显式指定了一个不存在的 vendor,降级到别家是错的;同样地,vendor 配置缺失/禁用也直接抛。
-     * 降级只用来应对"运行时调用失败"而不是"配置错误"。
-     *
-     * <p>当 {@code props.fallbackChain} 为空时,链只有一项(= {@code resolve(req)}),行为完全等同
-     * 直接调用 {@code resolve(req)},但通过 {@code FallbackChain} 暴露的好处是
-     * {@code LlmClient} 用统一代码处理"无降级"和"有降级"两种情况。
-     *
-     * @throws LlmException {@link ResultCode#LLM_MODEL_NOT_FOUND} —— 首选 vendor 不存在/禁用/未配置
+     * <p><b>Phase 7</b>:降级链数据源从 {@code props.getFallbackChain()} 切到
+     * {@code FallbackChainService.findEffective()}(DB → yaml → empty 三段语义),
+     * admin 通过 {@code PUT/DELETE /api/admin/ai/fallback-chain} 热改降级链,
+     * 改完下次 call 即生效(走 {@code FallbackChainChangedEvent} 失效 cache)。
      */
-    public FallbackChain resolveWithFallback(ChatRequest request) {
-        Resolved primary = resolve(request);  // 解析失败立刻抛
+    public FallbackChain resolveWithFallback(String vendor, String model) {
+        Resolved primary = resolve(vendor, model);  // 解析失败立刻抛
         List<Resolved> chain = new ArrayList<>();
         chain.add(primary);
 
-        if (props.getFallbackChain() != null) {
-            for (String vendor : props.getFallbackChain()) {
-                if (vendor == null || vendor.isBlank()) continue;
-                String v = vendor.trim();
-                // 跳过已加入链的 vendor(首选 + 前面已追加的)
+        // Phase 7 — 读 DB-优先降级链(yaml 兜底在 service 内部完成)
+        List<String> effectiveChain = fallbackChainService.findEffective().vendors();
+        if (effectiveChain != null) {
+            for (String fbVendor : effectiveChain) {
+                if (fbVendor == null || fbVendor.isBlank()) continue;
+                String v = fbVendor.trim();
                 if (containsVendor(chain, v)) continue;
-                // 跳过的 vendor 不存在或未启用 —— 降级时不应当把"无效配置"也串进来
                 ChatModel impl = models.get(v.toLowerCase());
                 if (impl == null) continue;
                 AiProperties.Provider p = props.getProviders().get(v);
@@ -134,16 +159,10 @@ public class ChatModelRouter {
     }
 
     /**
-     * 判断 {@code ex} 是否应当触发降级跳到下一 vendor。
-     *
-     * <p>白名单与 {@link ChatModelHttpSupport#isRetryable(LlmException)} 一致:
-     * 只在 {@link ResultCode#LLM_PROVIDER_ERROR} / {@link ResultCode#LLM_UPSTREAM_TIMEOUT}
-     * 时降级。其他业务错误({@code LLM_RATE_LIMITED} / {@code LLM_QUOTA_EXCEEDED} /
-     * {@code LLM_INVALID_REQUEST} / {@code LLM_CIRCUIT_OPEN} / {@code LLM_CONFIG_MISSING})
-     * 不降级 —— 这些错误给上游重试或改 vendor 都没有意义,直接抛给调用方。
-     *
-     * <p>注意这里不消费 {@code vendor} 参数,签名保留 vendor 是为以后按 vendor 定制触发矩阵
-     * (例如某些上游超时算"故障",某些上游超时算"限流")预留扩展点。当前实现两者一致。
+     * "触发降级"白名单 — 仅 {@link ResultCode#LLM_PROVIDER_ERROR} /
+     * {@link ResultCode#LLM_UPSTREAM_TIMEOUT} 触发。
+     * (历史:此判断原先与 {@code ChatModelHttpSupport.isRetryable} 共享常量,
+     * Phase 4 删 ChatModelHttpSupport 后保持同一白名单。)
      */
     public static boolean isFallbackTriggering(LlmException ex, String vendor) {
         if (ex == null) return false;
@@ -152,9 +171,76 @@ public class ChatModelRouter {
                 || code == ResultCode.LLM_UPSTREAM_TIMEOUT;
     }
 
-    /** 首选 vendor 是否已经在熔断中(http 为 null 时一律返回 false) */
+    /**
+     * 首选 vendor 是否已经在熔断中。
+     *
+     * <p>Phase 4 暂不实现熔断(原 {@code ChatModelHttpSupport} 已删除,
+     * Spring AI 的 retry / Resilience4j 留到 Phase 5 评估)。当前固定返回
+     * {@code false} — 保留方法签名是为了不破坏 {@code LlmClient} 调用点。
+     */
     public boolean isPrimaryVendorOpen(Resolved primary) {
-        return primary != null && http != null && http.isVendorOpen(primary.vendor());
+        return false;
+    }
+
+    // ─────────────────────── 内部 ───────────────────────
+
+    /**
+     * OpenAI 兼容 vendor aliasing — yaml 配置里 enabled=true 且走 OPENAI 协议的
+     * vendor key,如果 {@link #models} 里没有同名条目,会按 protocol 推断别名到
+     * 对应 starter 的 ChatModel bean。
+     *
+     * <p>典型场景(DeepSeek 移除独立 starter 后):
+     * <ul>
+     *   <li>Spring 容器注入 {@code openAiChatModel} / {@code anthropicChatModel}
+     *       / {@code ollamaChatModel} 3 个 bean</li>
+     *   <li>yaml 的 {@code providers.deepseek.*} 由 ProviderPropertiesBridge 桥到
+     *       {@code spring.ai.openai.*},openai starter 用 deepseek 的 base-url /
+     *       api-key 装配 {@code openAiChatModel} bean</li>
+     *   <li>本方法把 {@code models} 里的 {@code openai} 别名到 {@code deepseek} key
+     *       (以及 yaml 配的 dashscope / glm / minimax 等所有 OPENAI 协议 vendor),
+     *       这样 {@code resolve("deepseek", ...)} 不会抛 LLM_MODEL_NOT_FOUND,
+     *       而是直接路由到 openaiChatModel bean</li>
+     * </ul>
+     *
+     * <p>语义约束:
+     * <ul>
+     *   <li>yaml 里有但 map 里没有的 vendor key 才做 alias(已有自己的 bean 不覆盖)</li>
+     *   <li>只 alias 启用了的 vendor({@code providers.<v>.enabled=true})</li>
+     *   <li>协议推断走 {@link AiProperties#resolveProtocol};OPENAI 协议别名到
+     *       {@code openai} ChatModel,ANTHROPIC → {@code anthropic},OLLAMA →
+     *       {@code ollama}</li>
+     *   <li>目标 bean 不存在时(例如 yaml 配了 anthropic 但没装 anthropic starter)
+     *       不 alias,resolve 时自然抛 LLM_MODEL_NOT_FOUND</li>
+     * </ul>
+     *
+     * <p><b>多 vendor 共用 bean 的限制</b>:openai 协议只有 1 个 ChatModel bean
+     * (openAiChatModel),如果 yaml 同时启用 {@code providers.openai} 和
+     * {@code providers.deepseek},两者都会别名到同一个 bean — 哪个 yaml 段的
+     * 配置被 bridge 写到 {@code spring.ai.openai.*} 就用哪个(bridge addFirst
+     * 后写覆盖先写,迭代顺序按 yaml 解析顺序)。业务上建议同协议只启用一个 vendor。
+     */
+    private void aliasOpenAiCompatibleVendors() {
+        for (Map.Entry<String, Provider> entry : props.getProviders().entrySet()) {
+            String vendorKey = entry.getKey();
+            if (vendorKey == null || vendorKey.isBlank()) continue;
+            String normalizedKey = vendorKey.toLowerCase(Locale.ROOT);
+            if (models.containsKey(normalizedKey)) continue;  // 已有自己的 ChatModel bean,跳过
+            Provider p = entry.getValue();
+            if (p == null || !p.isEnabled()) continue;        // 禁用 vendor 不 alias
+
+            AiProperties.Protocol protocol = props.resolveProtocol(vendorKey);
+            String aliasKey = switch (protocol) {
+                case OPENAI -> "openai";
+                case ANTHROPIC -> "anthropic";
+                case OLLAMA -> "ollama";
+            };
+            ChatModel aliased = models.get(aliasKey);
+            if (aliased != null) {
+                log.debug("[ChatModelRouter] aliasing vendor={} → {} (协议 OPENAI 兼容 vendor 共用 ChatModel bean)",
+                        normalizedKey, aliasKey);
+                models.put(normalizedKey, aliased);
+            }
+        }
     }
 
     private static boolean containsVendor(List<Resolved> chain, String vendor) {
@@ -165,40 +251,41 @@ public class ChatModelRouter {
     }
 
     /**
-     * 内部路由解析逻辑：根据指定服务商、原始模型名校验可用性并生成最终路由结果
-     * @param vendor 服务商标识
-     * @param model 请求传入的原始模型名称
-     * @return 封装后的路由解析实体
+     * 按指定 vendor + 实际 model 名解析为 Resolved。
      */
     private Resolved resolveInternal(String vendor, String model) {
-        // 根据服务商名称获取对应的ChatModel实现，统一转小写匹配
-        ChatModel impl = models.get(vendor.toLowerCase());
+        String vendorLower = vendor == null ? "" : vendor.toLowerCase(Locale.ROOT);
+        ChatModel impl = models.get(vendorLower);
         if (impl == null) {
             throw new LlmException(ResultCode.LLM_MODEL_NOT_FOUND, "未找到 vendor=" + vendor);
         }
-        // 获取配置文件中该服务商的独立配置
-        AiProperties.Provider p = props.getProviders().get(vendor);
-        // 配置不存在 或 配置显式关闭该服务商，抛出异常禁止路由
+        // props.getProviders() 的 key 是 yaml 解析后的字面 key(Spring Boot relaxed
+        // binding 标准化为小写),跟 API 传入的 vendor 名做大小写不敏感匹配 — 否则
+        // 用户传 "DEEPSEEK" / "DeepSeek" 这种大小写变体时,即使 models map 已
+        // alias 成功,props 校验会误报 "vendor 已禁用"
+        AiProperties.Provider p = null;
+        for (Map.Entry<String, Provider> e : props.getProviders().entrySet()) {
+            if (e.getKey() != null && e.getKey().equalsIgnoreCase(vendor)) {
+                p = e.getValue();
+                break;
+            }
+        }
         if (p == null || !p.isEnabled()) {
             throw new LlmException(ResultCode.LLM_MODEL_NOT_FOUND, "vendor=" + vendor + " 已禁用");
         }
-        // 模型名为空时，使用该服务商自身配置的默认模型
-        String effectiveModel = (model == null || model.isBlank())
-                ? p.getDefaultModel()
-                : model;
+        String effectiveModel = (model == null || model.isBlank()) ? p.getDefaultModel() : model;
         return new Resolved(impl, vendor, effectiveModel);
     }
 
     /**
-     * 路由解析结果记录类
+     * 路由解析结果记录类。
+     * {@code model} 字段是 Spring AI 的 {@link ChatModel}(底层被具体 starter 装配)。
      */
     public record Resolved(ChatModel model, String vendor, String modelName) {}
 
     /**
-     * 降级链快照。{@link ChatModelRouter#resolveWithFallback(ChatRequest)} 时一次性构建;
+     * 降级链快照。{@link ChatModelRouter#resolveWithFallback} 时一次性构建;
      * 调用方按 {@link Iterable} 顺序依次尝试每一跳。
-     *
-     * <p>链至少 1 项(首选),至多 1 + {@code props.fallbackChain.size()} 项(去重 + 跳过无效 vendor)。
      */
     public record FallbackChain(List<Resolved> hops, String primaryVendor) implements Iterable<Resolved> {
         @Override
@@ -206,12 +293,10 @@ public class ChatModelRouter {
             return hops.iterator();
         }
 
-        /** 链长度(含首选) */
         public int size() {
             return hops.size();
         }
 
-        /** 是否只有首选、没有降级候选(等价于直接调用 {@code resolve(req)}) */
         public boolean isSingleHop() {
             return hops.size() == 1;
         }

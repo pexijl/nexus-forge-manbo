@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'com.nexusforge'
-version = '0.0.1-SNAPSHOT'
+version = '0.0.1.0-SNAPSHOT'
 description = '文件模块'
 
 
@@ -14,12 +14,38 @@ repositories {
 dependencies {
 
     implementation project(':nexus-forge-common')
+    implementation project(':nexus-forge-core')
+    // P2 commit 3: SecurityContextHolder 拿 principal + @PreAuthorize admin 端点
+    implementation 'org.springframework.security:spring-security-core'
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
 
     implementation platform('software.amazon.awssdk:bom:2.46.16')
     implementation("software.amazon.awssdk:s3")
     implementation("software.amazon.awssdk:s3-transfer-manager")
     implementation("software.amazon.awssdk:auth")
-    implementation("software.amazon.awssdk:regions")
+    implementation("software.amazon.awssdk:aws-core")
 
+    // P2: JPA + Hibernate — file_metadata 表与 FileEntity 持久化
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    // Flyway 数据库迁移 — SQL 脚本由 nexus-forge-user 持有(模块权威约定)
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+
+    // 单元测试
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation platform('org.junit:junit-bom:6.0.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // P2 commit 1: Testcontainers 验证 entity/repo + Flyway DDL 幂等
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = false
+    }
 }

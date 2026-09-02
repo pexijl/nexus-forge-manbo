@@ -1,5 +1,6 @@
 package com.nexusforge.controller;
 
+import com.nexusforge.base.PageResult;
 import com.nexusforge.base.Result;
 import com.nexusforge.controller.dto.*;
 import com.nexusforge.controller.vo.ConversationDetailVo;
@@ -16,8 +17,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @Slf4j
 @RestController
@@ -38,12 +37,17 @@ public class AiConversationController {
         return Result.success("对话已创建", vo);
     }
 
-    @Operation(summary = "列出我的对话")
+    @Operation(summary = "分页列出我的对话(置顶优先,更新时间倒序)")
     @GetMapping
-    public Result<List<ConversationVo>> list(
-            @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal) {
-        List<ConversationVo> vos = conversationService.listConversations(principal.userId());
-        return Result.success(vos);
+    public Result<PageResult<ConversationVo>> list(
+            @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
+            @Parameter(description = "1-based 页码", example = "1")
+            @RequestParam(defaultValue = "1") int page,
+            @Parameter(description = "每页大小(1-200,默认 20)", example = "20")
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<ConversationVo> paged = conversationService
+                .listConversationsPaged(principal.userId(), page, size);
+        return Result.success(paged);
     }
 
     @Operation(summary = "获取对话详情(含消息)")
@@ -85,12 +89,21 @@ public class AiConversationController {
         return Result.success(vo);
     }
 
-    @Operation(summary = "删除对话")
+    @Operation(summary = "删除对话(软删,数据保留)")
     @DeleteMapping("/{id}")
     public Result<Void> delete(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable("id") Long id) {
         conversationService.deleteConversation(principal.userId(), id);
         return Result.success("对话已删除", null);
+    }
+
+    @Operation(summary = "恢复已软删的对话")
+    @PostMapping("/{id}/restore")
+    public Result<Void> restore(
+            @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable("id") Long id) {
+        conversationService.restoreConversation(principal.userId(), id);
+        return Result.success("对话已恢复", null);
     }
 }

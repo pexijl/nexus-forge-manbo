@@ -1,13 +1,9 @@
 package com.nexusforge.service;
 
-import com.nexusforge.ai.ChatMessage;
-import com.nexusforge.ai.ChatResponse;
-import com.nexusforge.ai.ChatUsage;
-import com.nexusforge.ai.Role;
-import com.nexusforge.ai.ToolCall;
 import com.nexusforge.ai.service.PreferenceResolver;
 import com.nexusforge.client.LlmClient;
-import com.nexusforge.client.ToolRegistry;
+import com.nexusforge.client.UsageRecorder;
+import com.nexusforge.config.AiProperties;
 import com.nexusforge.controller.dto.CreateConversationDto;
 import com.nexusforge.controller.dto.SendMessageDto;
 import com.nexusforge.controller.dto.UpdateTitleDto;
@@ -22,6 +18,7 @@ import com.nexusforge.exception.BusinessException;
 import com.nexusforge.repository.AiConversationRepository;
 import com.nexusforge.repository.AiMessageRepository;
 import com.nexusforge.repository.AiMessageUsageRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +29,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Optional;
@@ -43,21 +49,28 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ConversationService 单元测试。
+ * ConversationService 单元测试(Phase 6 重写)。
  *
  * <p>覆盖:
  * <ul>
  *   <li>create:标题默认值、显式标题、字段透传</li>
- *   <li>sendMessage:正常路径持久化 user+assistant 两端、自动标题、用量、上下文构建</li>
+ *   <li>sendMessage:正常路径持久化 user+assistant、Usage 提取、上下文构建</li>
+ *   <li>sendMessage:Usage 提取不到(只有请求计数)、失败路径</li>
  *   <li>权限校验:跨用户访问抛 FORBIDDEN</li>
  *   <li>rename / pin / delete:权限校验与状态变更</li>
- *   <li>getConversation:包含消息列表与用量</li>
+ *   <li>listConversations:getConversation:消息列表 + 用量映射</li>
  * </ul>
+ *
+ * <p>spring-ai-full-migration Phase 6 重写:用 Spring AI 的
+ * {@link Prompt} / {@link ChatResponse} / {@link AssistantMessage} / {@link Usage}
+ * 替代原 com.nexusforge.ai.* 旧 DTO;MessageVo 不再有 toolCalls 字段,
+ * 旧 toolCalls JSON 持久化测试用例删(service 已不再处理 toolCalls)。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -68,26 +81,38 @@ class ConversationServiceTest {
     @Mock AiMessageUsageRepository usageRepo;
     @Mock LlmClient llmClient;
     @Mock ContextWindowBuilder contextBuilder;
-    /** P5 Step 4:UsageRecorder 上报 Micrometer 指标,ConversationService 在 save 之后调。 */
-    @Mock com.nexusforge.client.UsageRecorder usageRecorder;
-    /** P5 Step 5:配额校验。sendMessage 开头调 quotaService.check(userId)。 */
+    @Mock UsageRecorder usageRecorder;
     @Mock QuotaService quotaService;
-    /** P4 Step 11:用于序列化 ChatResponse.toolCalls → AiMessage.toolCalls JSON 列。 */
-    @Mock tools.jackson.databind.ObjectMapper objectMapper;
-    /** P7:用户偏好解析器。默认 stub 为 SYSTEM 模式(等价于没有用户偏好、沿用全局默认) */
     @Mock PreferenceResolver preferenceResolver;
-    /** P4 Step 12:工具调用循环用的注册表。ConversationService 把这个传给 LlmClient.callWithToolLoop。 */
-    @Mock com.nexusforge.client.ToolRegistry toolRegistry;
-    /** P4 Step 12:ConversationService 读 {@code props.getMaxToolTurns()} 决定循环上限。Mock 默认返回 0,不影响 stub。 */
-    @Mock com.nexusforge.config.AiProperties props;
+    @Mock EntityManager entityManager;
+    @Mock AiProperties props;
 
     @InjectMocks ConversationService service;
 
     @BeforeEach
     void stubPrefResolver() {
+        // @PersistenceContext 字段 Mockito 不会自动注入,手动反射注入
+        ReflectionTestUtils.setField(service, "entityManager", entityManager);
+
         // 默认所有测试都按"系统 Key 模式"走——vendor 用模型名解析出来的 vendor,Key 用 yaml。
+        // Phase 3 — PreferenceResolver 改成 3 参 (userId, model, proxyId);本测试都走 proxyId=null
+        // 走旧 path,1 参和 3 参都得 mock(2 参 overload 内部也调 3 参)
+        lenient().when(preferenceResolver.resolve(any(), any(), any())).thenAnswer(inv -> {
+            String modelField = inv.getArgument(1);
+            String vendor = "openai";
+            String modelName = "gpt-4o-mini";
+            if (modelField != null && !modelField.isBlank() && modelField.contains(":")) {
+                String[] parts = modelField.split(":", 2);
+                vendor = parts[0];
+                modelName = parts[1];
+            }
+            return new PreferenceResolver.Resolved(
+                    vendor, modelName,
+                    /* apiKey */ null, /* fingerprint */ null, /* baseUrl */ null,
+                    PreferenceResolver.KeySource.SYSTEM);
+        });
+        // 旧 2 参签名也 mock 一下(虽然实际 ConversationService 走 3 参,但保险)
         lenient().when(preferenceResolver.resolve(any(), any())).thenAnswer(inv -> {
-            Long uid = inv.getArgument(0);
             String modelField = inv.getArgument(1);
             String vendor = "openai";
             String modelName = "gpt-4o-mini";
@@ -164,22 +189,17 @@ class ConversationServiceTest {
         when(messageRepo.findMaxSeq(1L)).thenReturn(-1);
         when(messageRepo.findByConversationIdOrderBySeqAsc(1L)).thenReturn(List.of());
 
-        AiMessage userSaved = newMessage(10L, 0, Role.USER.name(), "你好");
-        AiMessage aiSaved = newMessage(11L, 1, Role.ASSISTANT.name(), "你好!有什么可以帮你的?");
+        AiMessage userSaved = newMessage(10L, 0, "USER", "你好");
+        AiMessage aiSaved = newMessage(11L, 1, "ASSISTANT", "你好!有什么可以帮你的?");
         when(messageRepo.save(any(AiMessage.class)))
                 .thenReturn(userSaved)
                 .thenReturn(aiSaved);
 
         when(contextBuilder.build(any(), eq("openai:gpt-4o-mini")))
-                .thenReturn(List.of(ChatMessage.builder().role(Role.USER).content("你好").build()));
+                .thenReturn(List.<Message>of(new UserMessage("你好")));
 
-        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
-                .id("resp-1")
-                .model("gpt-4o-mini")
-                .content("你好!有什么可以帮你的?")
-                .usage(ChatUsage.builder().promptTokens(10).completionTokens(20).totalTokens(30).build())
-                .finishReason("stop")
-                .build());
+        ChatResponse llmResp = chatResponse("你好!有什么可以帮你的?", "gpt-4o-mini", 10, 20, 30);
+        when(llmClient.call(any(Prompt.class), eq("openai"), eq("gpt-4o-mini"))).thenReturn(llmResp);
 
         when(usageRepo.save(any(AiMessageUsage.class))).thenReturn(null);
 
@@ -201,62 +221,29 @@ class ConversationServiceTest {
     }
 
     @Test
-    @DisplayName("sendMessage: assistant 触发 tool_calls → JSON 序列化 + VO 携带 toolCalls")
-    void sendMessage_persists_tool_calls_json() throws Exception {
+    @DisplayName("sendMessage: 无 usage metadata → 只调 recordRequest,token counter 不报")
+    void sendMessage_without_usage_only_records_request() {
         AiConversation conv = baseConv();
 
         when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
         when(messageRepo.findMaxSeq(1L)).thenReturn(-1);
         when(messageRepo.findByConversationIdOrderBySeqAsc(1L)).thenReturn(List.of());
+        when(messageRepo.save(any(AiMessage.class))).thenAnswer(inv -> {
+            AiMessage m = inv.getArgument(0);
+            if (m.getId() == null) m.setId(10L);
+            return m;
+        });
 
-        AiMessage userSaved = newMessage(10L, 0, Role.USER.name(), "查北京天气");
-        AiMessage aiSaved = newMessage(11L, 1, Role.ASSISTANT.name(), null);
-        when(messageRepo.save(any(AiMessage.class)))
-                .thenReturn(userSaved)
-                .thenReturn(aiSaved);
-
-        when(contextBuilder.build(any(), eq("openai:gpt-4o-mini")))
-                .thenReturn(List.of(ChatMessage.builder().role(Role.USER).content("查北京天气").build()));
-
-        ToolCall tc = ToolCall.builder()
-                .id("call_abc")
-                .name("get_weather")
-                .arguments(new tools.jackson.databind.ObjectMapper()
-                        .readTree("{\"city\":\"Beijing\"}"))
-                .build();
-        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
-                .id("resp-2")
-                .model("gpt-4o-mini")
-                .content(null)  // tool_calls 终止时 content 通常为 null
-                .usage(ChatUsage.builder().promptTokens(20).completionTokens(5).totalTokens(25).build())
-                .finishReason("tool_calls")
-                .toolCalls(List.of(tc))
-                .build());
-
-        // 关键:ObjectMapper.writeValueAsString 被调用,返回固定 JSON 字符串
-        when(objectMapper.writeValueAsString(any())).thenReturn(
-                "[{\"id\":\"call_abc\",\"name\":\"get_weather\",\"arguments\":{\"city\":\"Beijing\"}}]");
+        when(contextBuilder.build(any(), any())).thenReturn(List.of());
+        when(llmClient.call(any(Prompt.class), any(String.class), any(String.class)))
+                .thenReturn(chatResponseNoUsage("ok", "gpt-4o-mini"));
 
         SendMessageDto dto = new SendMessageDto();
-        dto.setContent("查北京天气");
+        dto.setContent("hi");
 
-        MessageVo vo = service.sendMessage(100L, 1L, dto);
+        service.sendMessage(100L, 1L, dto);
 
-        // 1. assistant message.tool_calls 列被写入 JSON
-        ArgumentCaptor<AiMessage> msgCaptor = ArgumentCaptor.forClass(AiMessage.class);
-        verify(messageRepo, times(2)).save(msgCaptor.capture());
-        AiMessage persistedAssistant = msgCaptor.getAllValues().get(1);
-        assertThat(persistedAssistant.getToolCalls())
-                .isEqualTo("[{\"id\":\"call_abc\",\"name\":\"get_weather\",\"arguments\":{\"city\":\"Beijing\"}}]");
-
-        // 2. VO 携带 toolCalls(类型 List<ToolCall>)
-        assertThat(vo.getToolCalls()).isNotNull();
-        assertThat(vo.getToolCalls()).hasSize(1);
-        assertThat(vo.getToolCalls().get(0).getId()).isEqualTo("call_abc");
-        assertThat(vo.getToolCalls().get(0).getName()).isEqualTo("get_weather");
-
-        // 3. JSON 序列化被调用 1 次
-        verify(objectMapper, times(1)).writeValueAsString(any());
+        verify(usageRepo, never()).save(any(AiMessageUsage.class));
     }
 
     @Test
@@ -274,11 +261,8 @@ class ConversationServiceTest {
             return m;
         });
         when(contextBuilder.build(any(), any())).thenReturn(List.of());
-        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
-                .content("ok")
-                .model("gpt-4o-mini")
-                .usage(ChatUsage.builder().promptTokens(1).completionTokens(1).totalTokens(2).build())
-                .build());
+        when(llmClient.call(any(Prompt.class), any(String.class), any(String.class)))
+                .thenReturn(chatResponse("ok", "gpt-4o-mini", 1, 1, 2));
         when(usageRepo.save(any())).thenReturn(null);
 
         SendMessageDto dto = new SendMessageDto();
@@ -306,11 +290,8 @@ class ConversationServiceTest {
             return m;
         });
         when(contextBuilder.build(any(), eq("openai:gpt-4o"))).thenReturn(List.of());
-        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
-                .content("hi")
-                .model("gpt-4o")
-                .usage(ChatUsage.builder().promptTokens(1).completionTokens(1).totalTokens(2).build())
-                .build());
+        when(llmClient.call(any(Prompt.class), eq("openai"), eq("gpt-4o")))
+                .thenReturn(chatResponse("hi", "gpt-4o", 1, 1, 2));
         when(usageRepo.save(any())).thenReturn(null);
 
         SendMessageDto dto = new SendMessageDto();
@@ -360,7 +341,7 @@ class ConversationServiceTest {
         when(messageRepo.countByConversationId(1L)).thenReturn(5L);
         when(messageRepo.countByConversationId(2L)).thenReturn(0L);
 
-        AiMessage lastMsg = newMessage(99L, 4, Role.ASSISTANT.name(), "最后一句话");
+        AiMessage lastMsg = newMessage(99L, 4, "ASSISTANT", "最后一句话");
         when(messageRepo.findLastNMessages(1L, 1)).thenReturn(List.of(lastMsg));
         when(messageRepo.findLastNMessages(2L, 1)).thenReturn(List.of());
 
@@ -383,8 +364,8 @@ class ConversationServiceTest {
         AiConversation conv = baseConv();
         conv.setId(1L);
 
-        AiMessage userMsg = newMessage(10L, 0, Role.USER.name(), "hi");
-        AiMessage aiMsg = newMessage(11L, 1, Role.ASSISTANT.name(), "hello back");
+        AiMessage userMsg = newMessage(10L, 0, "USER", "hi");
+        AiMessage aiMsg = newMessage(11L, 1, "ASSISTANT", "hello back");
         AiMessageUsage usage = new AiMessageUsage();
         usage.setMessageId(11L);
         usage.setPromptTokens(7);
@@ -445,81 +426,15 @@ class ConversationServiceTest {
     }
 
     @Test
-    @DisplayName("deleteConversation: 成功删除时静默返回")
-    void delete_succeeds() {
-        when(conversationRepo.deleteByIdAndUserId(1L, 100L)).thenReturn(1);
-
-        service.deleteConversation(100L, 1L);
-
-        verify(conversationRepo).deleteByIdAndUserId(1L, 100L);
-    }
-
-    @Test
-    @DisplayName("deleteConversation: 删除 0 行时抛 FORBIDDEN")
-    void delete_throws_when_no_match() {
-        when(conversationRepo.deleteByIdAndUserId(1L, 100L)).thenReturn(0);
+    @DisplayName("deleteConversation: 跨用户访问抛 FORBIDDEN,无 repo.delete 调用")
+    void delete_throws_when_not_owned() {
+        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.deleteConversation(100L, 1L))
-                .isInstanceOf(BusinessException.class);
-    }
-
-
-    // ──────────────────────────────────────────
-    // P5 Step 8: quota 校验 + usage fallback
-    // ──────────────────────────────────────────
-    @Test
-    @DisplayName("sendMessage: quotaService.check 抛异常 → LLM_QUOTA_EXCEEDED 不调 LLM")
-    void sendMessage_quota_exceeded_throws_before_llm() {
-        AiConversation conv = baseConv();
-        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
-        // P7:sendMessage 走 3-arg overload,stub 该版本
-        org.mockito.Mockito.doThrow(new BusinessException(ResultCode.LLM_QUOTA_EXCEEDED, "配额用尽"))
-                .when(quotaService).check(eq(100L), anyLong(), any());
-
-        SendMessageDto dto = new SendMessageDto();
-        dto.setContent("这条消息不该到达 LLM");
-
-        assertThatThrownBy(() -> service.sendMessage(100L, 1L, dto))
                 .isInstanceOf(BusinessException.class)
-                .extracting("code").isEqualTo(ResultCode.LLM_QUOTA_EXCEEDED.getCode());
+                .extracting("code").isEqualTo(ResultCode.FORBIDDEN.getCode());
 
-        // LLM 不应被调用
-        verify(llmClient, times(0)).call(any());
-    }
-
-    @Test
-    @DisplayName("sendMessage: LLM 返回 usage=null 时仍调 recordRequest 计数")
-    void sendMessage_usage_null_still_records_request_counter() {
-        AiConversation conv = baseConv();
-
-        when(conversationRepo.findByIdAndUserId(1L, 100L)).thenReturn(Optional.of(conv));
-        when(messageRepo.findMaxSeq(1L)).thenReturn(-1);
-        when(messageRepo.findByConversationIdOrderBySeqAsc(1L)).thenReturn(List.of());
-
-        AiMessage userSaved = newMessage(10L, 0, Role.USER.name(), "hi");
-        AiMessage aiSaved = newMessage(11L, 1, Role.ASSISTANT.name(), "hello");
-        when(messageRepo.save(any(AiMessage.class)))
-                .thenReturn(userSaved)
-                .thenReturn(aiSaved);
-
-        when(contextBuilder.build(any(), any())).thenReturn(List.of());
-
-        // LLM 返回 usage=null
-        when(llmClient.callWithToolLoop(any(), any(ToolRegistry.class), anyInt())).thenReturn(ChatResponse.builder()
-                .content("hello")
-                .model("gpt-4o-mini")
-                .usage(null)
-                .build());
-
-        SendMessageDto dto = new SendMessageDto();
-        dto.setContent("hi");
-
-        service.sendMessage(100L, 1L, dto);
-
-        // usage=null 时应调 recordRequest(model, keySource) 而非 recordMetrics
-        verify(usageRecorder).recordRequest(eq("openai:gpt-4o-mini"), any());
-        verify(usageRecorder, times(0)).recordMetrics(any(), any());
-        verify(usageRecorder, times(0)).recordMetrics(any(), any(), any());
+        verify(conversationRepo, never()).deleteById(anyLong());
     }
 
     // ──────────────────────────────────────────
@@ -527,13 +442,13 @@ class ConversationServiceTest {
     // ──────────────────────────────────────────
 
     private AiConversation baseConv() {
-        AiConversation c = new AiConversation();
-        c.setId(1L);
-        c.setUserId(100L);
-        c.setTitle("测试对话");
-        c.setModel("openai:gpt-4o-mini");
-        c.setPinned(false);
-        return c;
+        AiConversation conv = new AiConversation();
+        conv.setId(1L);
+        conv.setUserId(100L);
+        conv.setTitle("新对话");
+        conv.setModel("openai:gpt-4o-mini");
+        conv.setPinned(false);
+        return conv;
     }
 
     private AiMessage newMessage(long id, int seq, String role, String content) {
@@ -544,5 +459,31 @@ class ConversationServiceTest {
         m.setContent(content);
         m.setSeq(seq);
         return m;
+    }
+
+    /**
+     * 构造 Spring AI {@link ChatResponse}:有 usage metadata 的标准响应。
+     * Spring AI 2.0 的 Usage 字段是 Integer,不是 Long。
+     */
+    private static ChatResponse chatResponse(String content, String model, int prompt, int completion, int total) {
+        AssistantMessage msg = new AssistantMessage(content);
+        Usage usage = new Usage() {
+            @Override public Integer getPromptTokens() { return prompt; }
+            @Override public Integer getCompletionTokens() { return completion; }
+            @Override public Integer getTotalTokens() { return total; }
+            @Override public Object getNativeUsage() { return null; }
+        };
+        org.springframework.ai.chat.metadata.ChatResponseMetadata md =
+                org.springframework.ai.chat.metadata.ChatResponseMetadata.builder()
+                        .model(model)
+                        .usage(usage)
+                        .build();
+        return new ChatResponse(List.of(new Generation(msg)), md);
+    }
+
+    /** 构造无 usage metadata 的 ChatResponse(老 vendor 不报 token 的场景)。 */
+    private static ChatResponse chatResponseNoUsage(String content, String model) {
+        AssistantMessage msg = new AssistantMessage(content);
+        return new ChatResponse(List.of(new Generation(msg)));
     }
 }

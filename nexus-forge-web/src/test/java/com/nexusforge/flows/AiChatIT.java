@@ -1,8 +1,5 @@
 package com.nexusforge.flows;
 
-import com.nexusforge.ai.ChatRequest;
-import com.nexusforge.ai.ChatResponse;
-import com.nexusforge.ai.Role;
 import com.nexusforge.enums.ResultCode;
 import com.nexusforge.testsupport.IntegrationTestBase;
 import com.nexusforge.testsupport.MockChatModel;
@@ -194,7 +191,9 @@ class AiChatIT extends IntegrationTestBase {
                     String respBody = e.getResponseBodyAsString();
                     assertThat(respBody)
                             .contains("\"code\":" + ResultCode.LLM_MODEL_NOT_FOUND.getCode());
-                    assertThat(respBody).contains("未找到 vendor=mistral");
+                    // 文案迭代过(commit 4c6ecad 后从"未找到 vendor=X"改成
+                    // "请求指定 vendor=X 不支持或未启用"),不断定具体文本,只断 vendor 名
+                    assertThat(respBody).contains("vendor=mistral");
                 });
     }
 

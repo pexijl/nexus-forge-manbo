@@ -7,10 +7,13 @@ import org.springframework.stereotype.Component;
 import java.util.Set;
 
 /**
- * 测试间隔离:清空认证相关的 Redis key。
+ * 测试间隔离:清空认证 / 密码重置 / 账号注销 / 分布式锁相关的 Redis key。
  *
  * - auth:*:test:*     → JwtProperties.blacklistPrefix / refreshPrefix(test profile 下)
  * - auth:roles:*      → PermissionLoader/UserRoleProvider 缓存(无 test 前缀,统一清)
+ * - pwd:reset:*       → 密码重置验证码 / 限流 / 失败计数(密码重置功能新增)
+ * - pwd:delete:*      → 账号注销验证码 / 限流 / 恢复 token(账号生命周期新增)
+ * - lock:*            → 分布式锁 key(commit 5 分布式锁新增)
  *
  * 用 KEYS 在小数据集上 OK;测试场景数据量可控。
  */
@@ -24,6 +27,12 @@ public class RedisCleaner {
         Set<String> keys = redis.keys("auth:*:test:*");
         if (keys != null && !keys.isEmpty()) redis.delete(keys);
         keys = redis.keys("auth:roles:*");
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
+        keys = redis.keys("pwd:reset:*");
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
+        keys = redis.keys("pwd:delete:*");
+        if (keys != null && !keys.isEmpty()) redis.delete(keys);
+        keys = redis.keys("lock:*");
         if (keys != null && !keys.isEmpty()) redis.delete(keys);
     }
 }

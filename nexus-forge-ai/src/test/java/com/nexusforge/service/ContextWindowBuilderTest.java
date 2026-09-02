@@ -1,12 +1,14 @@
 package com.nexusforge.service;
 
-import com.nexusforge.ai.ChatMessage;
-import com.nexusforge.ai.Role;
 import com.nexusforge.config.AiProperties;
 import com.nexusforge.entity.AiMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>system 消息自身也占用预算</li>
  *   <li>token 估算基础行为</li>
  * </ul>
+ *
+ * <p>spring-ai-full-migration Phase 6 重写:返回值类型从 List&lt;com.nexusforge.ai.ChatMessage&gt;
+ * 改为 Spring AI 的 {@code List<Message>},断言用 {@code instanceof} 检测具体子类
+ * (SystemMessage / UserMessage / AssistantMessage)。
  */
 class ContextWindowBuilderTest {
 
@@ -42,7 +48,7 @@ class ContextWindowBuilderTest {
     @Test
     @DisplayName("空历史返回空列表")
     void empty_history_returns_empty_list() {
-        List<ChatMessage> result = builder.build(List.of(), "test-model");
+        List<Message> result = builder.build(List.of(), "test-model");
         assertThat(result).isEmpty();
     }
 
@@ -50,15 +56,15 @@ class ContextWindowBuilderTest {
     @DisplayName("system 消息始终保留在头部")
     void system_message_always_preserved() {
         List<AiMessage> history = List.of(
-                makeMsg(0, Role.SYSTEM.name(), "You are a helpful assistant."),
-                makeMsg(1, Role.USER.name(), "Hi")
+                makeMsg(0, "SYSTEM", "You are a helpful assistant."),
+                makeMsg(1, "USER", "Hi")
         );
-        List<ChatMessage> result = builder.build(history, "test-model");
+        List<Message> result = builder.build(history, "test-model");
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).getRole()).isEqualTo(Role.SYSTEM);
-        assertThat(result.get(0).getContent()).isEqualTo("You are a helpful assistant.");
-        assertThat(result.get(1).getRole()).isEqualTo(Role.USER);
-        assertThat(result.get(1).getContent()).isEqualTo("Hi");
+        assertThat(result.get(0)).isInstanceOf(SystemMessage.class);
+        assertThat(result.get(0).getText()).isEqualTo("You are a helpful assistant.");
+        assertThat(result.get(1)).isInstanceOf(UserMessage.class);
+        assertThat(result.get(1).getText()).isEqualTo("Hi");
     }
 
     @Test
@@ -69,19 +75,19 @@ class ContextWindowBuilderTest {
         List<AiMessage> history = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
             history.add(makeMsg(i,
-                    i % 2 == 0 ? Role.USER.name() : Role.ASSISTANT.name(),
+                    i % 2 == 0 ? "USER" : "ASSISTANT",
                     "Message " + i + " with some padding text"));
         }
 
-        List<ChatMessage> result = builder.build(history, "test-model");
+        List<Message> result = builder.build(history, "test-model");
 
         // 截断后数量应小于 20
         assertThat(result.size()).isLessThan(20);
         assertThat(result.size()).isPositive();
         // 最后一条消息应保留
-        assertThat(result.get(result.size() - 1).getContent()).contains("Message 19");
+        assertThat(result.get(result.size() - 1).getText()).contains("Message 19");
         // 第一条应该是 Message 19 减去预算外的旧消息,不应该是 Message 0
-        assertThat(result.get(0).getContent()).doesNotContain("Message 0 ");
+        assertThat(result.get(0).getText()).doesNotContain("Message 0 ");
     }
 
     @Test
@@ -90,15 +96,15 @@ class ContextWindowBuilderTest {
         // 200 chars ≈ 100 tokens = 整个预算;后续 user 消息放不下
         String longSystem = "A".repeat(200);
         List<AiMessage> history = List.of(
-                makeMsg(0, Role.SYSTEM.name(), longSystem),
-                makeMsg(1, Role.USER.name(), "Hi")
+                makeMsg(0, "SYSTEM", longSystem),
+                makeMsg(1, "USER", "Hi")
         );
 
-        List<ChatMessage> result = builder.build(history, "test-model");
+        List<Message> result = builder.build(history, "test-model");
 
         // 只有 system 消息被保留,user 消息被截断
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getRole()).isEqualTo(Role.SYSTEM);
+        assertThat(result.get(0)).isInstanceOf(SystemMessage.class);
     }
 
     @Test
@@ -115,11 +121,11 @@ class ContextWindowBuilderTest {
     void single_token_message_kept() {
         // maxTokens=100,只有 3 条极短消息
         List<AiMessage> history = List.of(
-                makeMsg(0, Role.USER.name(), "A"),
-                makeMsg(1, Role.ASSISTANT.name(), "B"),
-                makeMsg(2, Role.USER.name(), "C")
+                makeMsg(0, "USER", "A"),
+                makeMsg(1, "ASSISTANT", "B"),
+                makeMsg(2, "USER", "C")
         );
-        List<ChatMessage> result = builder.build(history, "test-model");
+        List<Message> result = builder.build(history, "test-model");
         assertThat(result).hasSize(3);
     }
 

@@ -1,14 +1,13 @@
 package com.nexusforge.flows;
 
-import com.nexusforge.ai.ChatResponse;
 import com.nexusforge.enums.ResultCode;
-import com.nexusforge.model.ChatModel;
 import com.nexusforge.testsupport.IntegrationTestBase;
 import com.nexusforge.testsupport.MockChatModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -105,10 +104,13 @@ class FallbackIT extends IntegrationTestBase {
     @Test
     @DisplayName("首选 vendor(openai)抛 3004 → 自动降级到 ollama,响应来自 ollama")
     void primary_fails_falls_back_to_secondary() {
-        // 校验两个 mock bean 都在容器里
+        // 校验两个 mock bean 都在容器里 — Spring AI 2.0 ChatModel 没有 name() 方法,
+        // 改用 class name 区分(openai 对应 MockChatModelImpl 构造参数,容器里有 2 个
+        // MockChatModelImpl 实例,bean name 一个 openAiChatModel 一个 ollamaChatModel)
         List<ChatModel> all = ctx.getBeanProvider(ChatModel.class).orderedStream().toList();
-        assertThat(all.stream().map(ChatModel::name).toList())
-                .contains("openai", "ollama");
+        assertThat(all).hasSize(2);
+        // 2 个 bean 来自 MockChatModelImpl(都标了 vendor name 构造参数,但 bean 是同类型)
+        assertThat(all.stream().allMatch(m -> m instanceof MockChatModel.MockChatModelImpl)).isTrue();
 
         String token = freshAccessToken();
         String body = """
@@ -123,10 +125,10 @@ class FallbackIT extends IntegrationTestBase {
         assertThat(resp.getStatusCode().is2xxSuccessful()).isTrue();
         JsonNode root = resp.getBody();
         assertThat(root.get("code").asInt()).isEqualTo(ResultCode.SUCCESS.getCode());
-        ChatResponse data = parseData(root);
+        JsonNode data = root.get("data");
         // 关键是 model 字段:来自 ollama 的 mock(不是 openai)
-        assertThat(data.getModel()).startsWith("mock-ollama-");
-        assertThat(data.getContent()).isEqualTo("echo:hello");
+        assertThat(data.get("model").asString()).startsWith("mock-ollama-");
+        assertThat(data.get("content").asString()).isEqualTo("echo:hello");
     }
 
     @Test
@@ -151,20 +153,9 @@ class FallbackIT extends IntegrationTestBase {
                 new HttpEntity<>(body, h), JsonNode.class);
 
         assertThat(resp.getStatusCode().is2xxSuccessful()).isTrue();
-        ChatResponse data = parseData(resp.getBody());
+        JsonNode data = resp.getBody().get("data");
         // 首选 vendor 解析为 ollama,直接命中(无降级)
-        assertThat(data.getModel()).startsWith("mock-ollama-");
-        assertThat(data.getContent()).isEqualTo("echo:hi-ollama");
-    }
-
-    private ChatResponse parseData(JsonNode root) {
-        JsonNode data = root.get("data");
-        return ChatResponse.builder()
-                .id(data.path("id").asString())
-                .model(data.path("model").asString())
-                .content(data.path("content").asString())
-                .finishReason(data.path("finishReason").asString())
-                .latencyMillis(data.path("latencyMillis").asLong())
-                .build();
+        assertThat(data.get("model").asString()).startsWith("mock-ollama-");
+        assertThat(data.get("content").asString()).isEqualTo("echo:hi-ollama");
     }
 }

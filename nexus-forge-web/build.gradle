@@ -24,6 +24,8 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui")
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // P2 Audit commit 4:AdminAuditController 用 @PreAuthorize("hasRole('ADMIN')")
+    implementation 'org.springframework.security:spring-security-core'
 
     // 测试依赖
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
@@ -31,6 +33,10 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    // P6:MockChatModel + 几个 AI IT 直接 import Spring AI 类型(Prompt/ChatResponse/Usage 等),
+    // 需要 spring-ai-model 在 test classpath。版本由 nexus-forge-ai 通过 spring-ai-bom 锁住,
+    // 这里只引不写版本号避免漂移。
+    testImplementation 'org.springframework.ai:spring-ai-model'
 
     // Testcontainers
     testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')

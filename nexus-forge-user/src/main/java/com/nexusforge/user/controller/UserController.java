@@ -52,6 +52,10 @@ public class UserController {
             @ApiResponse(responseCode = "2003", description = "邮箱已被他人占用", content = @Content)
     })
     @PatchMapping("/me")
+    @com.nexusforge.audit.Audited(
+            value = "user.update",
+            resource = "user",
+            resourceId = "#principal.userId()")
     public Result<UserVo> updateMe(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
             @RequestBody UpdateUserDto dto) {
@@ -69,6 +73,10 @@ public class UserController {
             @ApiResponse(responseCode = "2012", description = "新旧密码相同", content = @Content)
     })
     @PostMapping("/me/password")
+    @com.nexusforge.audit.Audited(
+            value = "user.password.change",
+            resource = "user",
+            resourceId = "#principal.userId()")
     public Result<Void> changePassword(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody ChangePasswordDto dto) {
@@ -90,6 +98,10 @@ public class UserController {
 
     @Operation(summary = "删除当前用户头像")
     @DeleteMapping("/me/avatar")
+    @com.nexusforge.audit.Audited(
+            value = "user.avatar.remove",
+            resource = "user",
+            resourceId = "#principal.userId()")
     public Result<UserVo> removeAvatar(
             @Parameter(hidden = true) @AuthenticationPrincipal UserPrincipal principal) {
         return Result.success(userService.removeAvatar(principal.userId()));

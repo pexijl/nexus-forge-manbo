@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Nexus Forge 账号已注销</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+               color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px; }
+        .meta { color: #6b7280; font-size: 14px; }
+    </style>
+</head>
+<body>
+<h2>账号已注销</h2>
+<p>邮箱 <strong th:text="${email}">user@example.com</strong> 对应的 Nexus Forge 账号已注销。</p>
+<p>所有对话 / 文件 / 资料已被永久删除。14 天内可点击下方链接撤销注销,
+逾期将无法恢复。</p>
+<p><a th:href="${restoreUrl}" href="#">撤销注销(14 天内有效)</a></p>
+<hr/>
+<p class="meta">如果这不是你本人的操作,请立即联系客服。</p>
+</body>
+</html>

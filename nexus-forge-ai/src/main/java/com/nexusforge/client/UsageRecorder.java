@@ -1,9 +1,9 @@
 package com.nexusforge.client;
 
-import com.nexusforge.ai.ChatUsage;
 import com.nexusforge.ai.service.PreferenceResolver.KeySource;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.stereotype.Component;
 
 /**
@@ -83,7 +83,7 @@ public class UsageRecorder {
      * @param model     具体模型名
      * @param keySource 三态 key 源(可传 null,默认 system)
      */
-    public void recordMetrics(ChatUsage usage, String model, KeySource keySource) {
+    public void recordMetrics(Usage usage, String model, KeySource keySource) {
         if (meterRegistry == null) {
             return;
         }
@@ -117,7 +117,7 @@ public class UsageRecorder {
     /**
      * 兼容旧调用,默认 {@link KeySource#SYSTEM}。
      */
-    public void recordMetrics(ChatUsage usage, String model) {
+    public void recordMetrics(Usage usage, String model) {
         recordMetrics(usage, model, KeySource.SYSTEM);
     }
 
