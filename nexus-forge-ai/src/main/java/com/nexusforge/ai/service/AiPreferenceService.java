@@ -92,7 +92,7 @@ public class AiPreferenceService {
         String vendor = dto.getVendor().trim().toLowerCase(Locale.ROOT);
         if (!vendorRegistry.supportsPrivateKey(vendor)) {
             throw new BusinessException(ResultCode.LLM_MODEL_NOT_FOUND,
-                    "vendor=" + vendor + " 不支持个性化配置(仅 openai/deepseek/qwen/ollama 可用户级配置)");
+                    "vendor=" + vendor + " 不支持个性化配置(仅 openai/deepseek/ollama 可用户级配置)");
         }
         UserAiPreference p = userPrefRepo.findById(userId).orElseGet(() -> {
             UserAiPreference np = new UserAiPreference();

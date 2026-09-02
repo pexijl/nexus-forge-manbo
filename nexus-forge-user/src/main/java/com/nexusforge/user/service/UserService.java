@@ -2,8 +2,6 @@ package com.nexusforge.user.service;
 
 import com.nexusforge.dto.RegisterRequest;
 import com.nexusforge.enums.ResultCode;
-import com.nexusforge.enums.UserStatus;
-import com.nexusforge.event.UserBannedEvent;
 import com.nexusforge.exception.BusinessException;
 import com.nexusforge.file.FileBizType;
 import com.nexusforge.file.FileClient;
@@ -15,7 +13,6 @@ import com.nexusforge.user.repository.UserRepository;
 import com.nexusforge.user.vo.UserVo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +22,8 @@ import java.io.IOException;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * 用户服务类
+ * 用户服务类 —— 用户资料 / 头像 / 密码 / 注册。账号封禁 / 注销已迁移到
+ * {@link AccountLifecycleService},本类只保留自身业务。
  */
 @Slf4j
 @Service
@@ -34,9 +32,9 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserRoleProvider userRoleProvider;
-    private final ApplicationEventPublisher eventPublisher;
     private final PasswordEncoder passwordEncoder;
     private final FileClient fileClient;
+    private final AccountLifecycleService accountLifecycleService;
 
     private static final char[] CHARS = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
 
@@ -171,13 +169,9 @@ public class UserService {
 
     @Transactional
     public void banUser(Long userId) {
-        userRepository.findById(userId).ifPresent(u -> {
-            u.setStatus(UserStatus.BANNED);
-            userRepository.save(u);
-        });
-        userRoleProvider.evict(userId);   // 清角色缓存
-        // 通过事件解耦踢下线：由 auth 模块监听执行
-        eventPublisher.publishEvent(new UserBannedEvent(userId));
+        // 委派给 AccountLifecycleService —— 账号生命周期集中处理
+        // (权限校验 / 审计 / 事件分发 / 缓存清理都在那里)
+        accountLifecycleService.ban(userId, null, null);
     }
 
     /**

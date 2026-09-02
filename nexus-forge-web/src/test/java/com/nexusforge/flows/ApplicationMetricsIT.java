@@ -1,6 +1,5 @@
 package com.nexusforge.flows;
 
-import com.nexusforge.ai.ChatUsage;
 import com.nexusforge.client.UsageRecorder;
 import com.nexusforge.testsupport.IntegrationTestBase;
 import com.nexusforge.testsupport.MockChatModel;
@@ -9,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -105,10 +105,15 @@ class ApplicationMetricsIT extends IntegrationTestBase {
         assertThat(mr).as("UsageRecorder.meterRegistry should not be null").isNotNull();
 
         // 直接调 recordMetrics,验证 counter 注册
-        usageRecorder.recordMetrics(
-                ChatUsage.builder()
-                        .promptTokens(10).completionTokens(20).totalTokens(30).build(),
-                "test-model");
+        // Phase 6:用 Spring AI Usage 匿名实现替代原 com.nexusforge.ai.ChatUsage
+        final int pT = 10, cT = 20, tT = 30;
+        Usage usage = new Usage() {
+            @Override public Integer getPromptTokens() { return pT; }
+            @Override public Integer getCompletionTokens() { return cT; }
+            @Override public Integer getTotalTokens() { return tT; }
+            @Override public Object getNativeUsage() { return null; }
+        };
+        usageRecorder.recordMetrics(usage, "test-model");
 
         var counter = meterRegistry.find("ai.chat.requests").counter();
         assertThat(counter).as("counter should exist after recordMetrics").isNotNull();

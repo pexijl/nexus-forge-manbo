@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>重置你的 Nexus Forge 密码</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+               color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px; }
+        .code { font-size: 32px; font-weight: 700; letter-spacing: 4px;
+                color: #2563eb; padding: 16px 24px; background: #f3f4f6;
+                border-radius: 8px; display: inline-block; margin: 16px 0; }
+        .meta { color: #6b7280; font-size: 14px; }
+        .warn { color: #b91c1c; font-size: 13px; margin-top: 24px; }
+    </style>
+</head>
+<body>
+<h2>重置你的 Nexus Forge 密码</h2>
+<p>你(或冒充你的人)请求重置这个邮箱对应的密码。验证码如下:</p>
+<div class="code" th:text="${code}">000000</div>
+<p class="meta">
+    本验证码 <strong th:text="${ttlMinutes}">5</strong> 分钟内有效,
+    逾期或失败 5 次后自动失效。
+</p>
+<p class="warn">
+    如果这不是你本人的操作,请忽略本邮件 —— 你的账号不会被改动。
+</p>
+<hr/>
+<p class="meta">Nexus Forge 自动邮件,请勿回复。</p>
+</body>
+</html>

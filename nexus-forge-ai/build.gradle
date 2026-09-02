@@ -36,6 +36,26 @@ dependencies {
     // nexus-forge-ai 是 library,不依赖 actuator;但需要 io.micrometer:micrometer-core 中的
     // MeterRegistry 接口(observation/commons 不含)。
     implementation 'io.micrometer:micrometer-core'
+    // Phase 1 — model catalog 缓存:ModelCatalogService 用 Caffeine 做 5min TTL +
+    // 事件失效。nexus-forge-core 也用 Caffeine 但只声明为 implementation
+    // (不向上传递),所以 ai 模块要直接声明。版本与根 build.gradle dependencyManagement
+    // 锁定一致(caffeine 3.2.4)。
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.4'
+    // spring-ai-full-migration Phase 1 + 后续精简:引入 3 个 Spring AI 官方厂商 starter
+    // (qwen / DashScope 不在 Spring AI 官方生态,由 Spring AI Alibaba 社区维护,
+    //  暂不接入)。版本由根 build.gradle 的 spring-ai-bom 统一锁定,不显式写 version。
+    // - openai:覆盖 OpenAI 托管,以及 DeepSeek / Ollama / 中转站 / 国内 OpenAI 兼容厂商。
+    //   DeepSeek 原本走 spring-ai-starter-model-deepseek(phase X 移除)— DeepSeek API
+    //   是 OpenAI Chat Completions 协议家族,复用 OpenAI starter 更轻量;yaml 的
+    //   providers.deepseek.* 配置由 ProviderPropertiesBridge 桥到 spring.ai.openai.*,
+    //   ChatModelRouter 通过 aliasing 把 "deepseek" vendor 路由到 openAiChatModel bean。
+    //   私 Key 模式仍由 VendorChatModelFactory 动态构造 OpenAiChatModel 走 DeepSeek
+    //   base-url/api-key,跟系统 Key 路径一致。
+    // - anthropic:Anthropic Claude 全家桶(2.0 已切官方 anthropic-sdk-java,非 OpenAI 兼容)
+    // - ollama:本地推理,默认 base-url http://localhost:11434
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+    implementation 'org.springframework.ai:spring-ai-starter-model-anthropic'
+    implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testImplementation 'org.junit.jupiter:junit-jupiter-params'
     testImplementation 'com.squareup.okhttp3:mockwebserver3-junit5:5.4.0'

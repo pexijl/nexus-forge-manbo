@@ -38,6 +38,23 @@ public interface FileClient {
                                            Duration ttl);
 
     /**
+     * 前端直传完成后的确认回调 —— 把 PENDING 行翻为 ACTIVE。
+     *
+     * <p>调用方在 PUT 完成后(拿到 ETag 与最终 size)调用本方法;幂等:
+     * 已 ACTIVE 行 no-op;不存在 → 抛 NOT_FOUND;已 DELETED → 抛
+     * ALREADY_DELETED。</p>
+     *
+     * <p>本方法仅翻元数据状态;对象存储本身由前端 PUT 写入,后端不重复上传。</p>
+     *
+     * @param key  对象存储 key(同 {@code FileMeta.key} / 上传凭证的 publicUrl 中)
+     * @param etag 对象返回的 ETag(可空,空时跳过 etag 回填)
+     * @param size 实际字节数(可空,空时跳过 size 校正)
+     * @return 翻状态后的元数据 id
+     * @since P2 commit 2
+     */
+    Long confirmUpload(String key, String etag, Long size);
+
+    /**
      * 颁发前端读取凭证（私有对象），默认有效期为 7 天
      * @param key 文件key
      * @return 读取凭证URL

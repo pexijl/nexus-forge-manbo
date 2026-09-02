@@ -17,12 +17,28 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation("org.springframework.boot:spring-boot-starter-aspectj")
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // 处理 @PreAuthorize 抛的 AccessDeniedException(@RestControllerAdvice catch 后转 403)
+    implementation 'org.springframework.security:spring-security-core'
     implementation("com.bucket4j:bucket4j_jdk17-core:8.19.0")
     implementation 'com.github.ben-manes.caffeine:caffeine:3.2.4'
+    // P2 Lock commit 2:DistributedLockTemplate 走 Micrometer 暴露 acquire / release
+    // / contention / lease_expired 四个 counter + 一个 timer
+    implementation 'io.micrometer:micrometer-core'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+
+    // 单元测试
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Audit commit 1:OperationAuditLogRepositoryTest 跑 Testcontainers 真 SQL
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.20.4')
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
 }
 
 test {
     useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = false
+    }
 }

@@ -14,6 +14,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -47,11 +48,16 @@ import java.util.List;
  */
 @Slf4j
 @Component
-@org.springframework.core.annotation.Order(90)
+@Order(90)   // 90 < JwtAuthenticationFilter(100):SSE 路径上
+// query token 先被本 filter 尝试;若该请求同时
+// 带 Authorization header,JwtAuthenticationFilter
+// 后续会用 header 的 Authentication 覆盖(更安全)
 @RequiredArgsConstructor
 public class JwtQueryTokenFilter extends OncePerRequestFilter {
 
-    /** SSE 端点路径前缀;P2 仅 {@code /api/ai/chat/stream} 一个端点。 */
+    /**
+     * SSE 端点路径前缀;P2 仅 {@code /api/ai/chat/stream} 一个端点。
+     */
     public static final String STREAM_PATH_PREFIX = "/api/ai/chat/stream";
 
     private final JwtUtil jwtUtil;
@@ -75,12 +81,16 @@ public class JwtQueryTokenFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     @NonNull HttpServletResponse response,
                                     @NonNull FilterChain filterChain) throws ServletException, IOException {
+        // 1) 从 query string 取 token(EventSource / fetch+reader 不能设自定义 header 的兜底)
+        //    无 token 不阻塞 → 由 JwtAuthenticationFilter 走 Authorization header 兜底
         String token = request.getParameter(StreamAuthorizationPolicy.QUERY_PARAM);
         if (token == null || token.isBlank()) {
             filterChain.doFilter(request, response);
             return;
         }
 
+        // 2) 验签:无效 token 不直接 401 → 与主鉴权链路行为一致(主 filter 也只是放行),
+        //    由后续 EntryPoint 统一返回 session 失效信号
         if (!jwtUtil.validateToken(token)) {
             log.warn("[JwtQueryTokenFilter] 无效的 query token");
             filterChain.doFilter(request, response);
@@ -90,14 +100,16 @@ public class JwtQueryTokenFilter extends OncePerRequestFilter {
         try {
             Claims claims = jwtUtil.parseToken(token);
 
-            // access token 才放行;refresh token 一律拒绝
+            // 3) type claim 校验:必须是 access,refresh 一律拒绝
+            //    ——防止 refresh 被滥用做 SSE 长连接请求(防 token 滥用)
             if (jwtUtil.extractType(claims) != TokenType.ACCESS) {
                 log.debug("[JwtQueryTokenFilter] 拒绝非 access token 走 SSE 路径");
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            // 黑名单检查:被吊销的 token 一律拒绝(与 JwtAuthenticationFilter 一致)
+            // 4) 黑名单:与 JwtAuthenticationFilter 一致;按 token 剩余 TTL 精准加入,
+            //    jwt.enable-blacklist 开关可临时关掉做调试
             if (jwtProps.getEnableBlacklist() && authService.isBlacklisted(claims)) {
                 log.debug("[JwtQueryTokenFilter] JWT 已被吊销: jti={}", claims.getId());
                 SecurityContextHolder.clearContext();
@@ -105,20 +117,26 @@ public class JwtQueryTokenFilter extends OncePerRequestFilter {
                 return;
             }
 
+            // 5) 从 Claims 拿 userId(sub) / username
             Long userId = Long.valueOf(claims.getSubject());
             String username = claims.get("username", String.class);
 
+            // 6) 构造 Authentication:三参 = principal + credentials(null, JWT 已验) + 空 authorities
+            //    空 authorities:P2 SSE 端点暂未引入 RBAC,先放空集合省 Redis 查询;
+            //    List.of() 不可变空集合,避免下游误 add
             UserPrincipal principal = new UserPrincipal(userId, username);
-            // 空 authorities:见类级注释;P2 SSE 端点暂未引入 RBAC
             UsernamePasswordAuthenticationToken auth =
                     new UsernamePasswordAuthenticationToken(principal, null, List.of());
             SecurityContextHolder.getContext().setAuthentication(auth);
 
             log.debug("[JwtQueryTokenFilter] query token 鉴权成功: userId={}", userId);
         } catch (Exception e) {
+            // 7) 异常兜底:解析/拉取/构建异常都吞掉,不冒泡 500;
+            //    清空 SecurityContext 防 Tomcat 线程复用污染上一个请求的认证态
             log.error("[JwtQueryTokenFilter] JWT 解析异常", e);
             SecurityContextHolder.clearContext();
         }
+        // 8) 无论成功失败都继续链:成功 → SSE 控制器;失败 → 后续 EntryPoint 决定 401
         filterChain.doFilter(request, response);
     }
 }

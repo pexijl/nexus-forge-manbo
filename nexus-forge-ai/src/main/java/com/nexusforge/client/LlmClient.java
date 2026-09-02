@@ -1,199 +1,346 @@
 package com.nexusforge.client;
 
-import com.nexusforge.ai.ChatChunk;
-import com.nexusforge.ai.ChatMessage;
-import com.nexusforge.ai.ChatRequest;
-import com.nexusforge.ai.ChatResponse;
-import com.nexusforge.ai.Role;
-import com.nexusforge.ai.ToolCall;
+import com.nexusforge.ai.entity.AiModelCatalog;
+import com.nexusforge.ai.service.ModelCatalogService;
 import com.nexusforge.config.AiProperties;
-import com.nexusforge.error.StreamTimeoutException;
 import com.nexusforge.enums.ResultCode;
+import com.nexusforge.error.StreamTimeoutException;
 import com.nexusforge.exception.LlmException;
-import com.nexusforge.model.ChatModel;
 import com.nexusforge.router.ChatModelRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.DefaultToolCallingManager;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.model.tool.ToolExecutionResult;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.ToolCallbackProvider;
+import org.springframework.ai.tool.resolution.StaticToolCallbackResolver;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 
 /**
- * LLM 门面。其他模块(如未来可能的 nexus-forge-visual 摘要生成)只依赖此门面,
- * 不直接依赖 ChatModel SPI。
+ * spring-ai-full-migration Phase 3 — Spring AI 化 LLM 门面 + 真实 tool loop。
  *
- * <p>P4 Step 8 增强:
- * <ul>
- *   <li>由 {@link ChatModelRouter#resolveWithFallback(ChatRequest)} 解析首选 + 降级链,
- *       本类按链依次尝试,首选失败({@link ResultCode#LLM_PROVIDER_ERROR} /
- *       {@link ResultCode#LLM_UPSTREAM_TIMEOUT},或首选 vendor 当前处于熔断态)时自动跳到下一跳。</li>
- *   <li>所有跳都用尽时抛 {@link ResultCode#LLM_ALL_VENDORS_FAILED},cause 携带最后一跳的
- *       {@link LlmException}。</li>
- *   <li>{@code props.fallbackChain} 为空时,行为完全等同 P2-P3(单次调用 + 现有错误码)。</li>
- * </ul>
+ * <p>同步调用方法(2b 4 个重载)不变,只是内部把
+ * {@code ChatModel.call(prompt)} 替换成 {@link #callWithToolLoop},这样所有路径
+ * (系统 Key / 私 Key)都自动获得 tool loop 能力。
+ *
+ * <p>工具循环用 Spring AI 的 {@link DefaultToolCallingManager}:
+ * <ol>
+ *   <li>首次 {@code chatModel.call(prompt)} 拿到 {@link ChatResponse}</li>
+ *   <li>若 response 含 tool calls(检测 {@code AssistantMessage.getToolCalls()})
+ *       → 调 {@code toolCallingManager.executeToolCalls(prompt, response)} 拿到
+ *       含 tool result 的新 conversation history</li>
+ *   <li>用新 history 重构 {@code Prompt},再次 {@code chatModel.call(...)}</li>
+ *   <li>循环直到响应不再有 tool calls,或达到
+ *       {@link AiProperties#getMaxToolIterations()} 安全上限</li>
+ * </ol>
+ *
+ * <p>tool callbacks 通过 {@link ToolCallbackProvider} 接口注入 — 任何
+ * {@code @Component} 里的 {@code @Tool} 方法会被 Spring AI 扫到并自动生成
+ * {@link ToolCallback}。具体注册在 {@code AiAutoConfiguration} 的
+ * {@code toolCallbackProvider} bean。
  */
 @Slf4j
-/**
- * P4 Step 11:bean 注册改由 {@link com.nexusforge.bootstrap.AiAutoConfiguration}
- * 通过 {@code @Bean} 注入。本类不再 {@code @Component},原因同
- * {@link ChatModelRouter} —— 显式 ctor + 多参依赖,Spring 类扫描默认会找
- * {@code <init>()} 失败。
- */
+@Component
+@RequiredArgsConstructor
 public class LlmClient {
 
     private final ChatModelRouter router;
     private final AiProperties props;
-    /**
-     * P4 Step 11:流式响应在出口处套一层 {@link FunctionCallAggregator},
-     * 把 OpenAI 风格的 {@code delta.tool_calls[]} 增量帧聚合为终止帧的完整 {@code toolCalls} 列表。
-     * 仅 {@link #stream(ChatRequest)} 路径生效;同步 {@link #call(ChatRequest)} 由
-     * {@link com.nexusforge.provider.openai.OpenAiJsonMapper#fromOpenAi} 直接从
-     * {@code message.tool_calls} 字段提取,不走聚合。
-     */
-    private final FunctionCallAggregator functionCallAggregator;
+    private final List<ToolCallbackProvider> toolCallbackProviders;
+    private final ModelCatalogService modelCatalogService;
+    private final com.nexusforge.ai.provider.SystemKeyChatModelFactory systemKeyFactory;
+
+    /** 启动时把所有 provider 的 callbacks 平铺成 1 个 list;为空 = 关闭 tool loop。 */
+    private final List<ToolCallback> toolCallbacks = initToolCallbacks();
+
+    private final ToolCallingManager toolCallingManager = initToolCallingManager();
+
+    private List<ToolCallback> initToolCallbacks() {
+        if (toolCallbackProviders == null) return List.of();
+        return toolCallbackProviders.stream()
+                .flatMap(p -> Arrays.stream(p.getToolCallbacks()))
+                .toList();
+    }
+
+    private ToolCallingManager initToolCallingManager() {
+        return DefaultToolCallingManager.builder()
+                .toolCallbackResolver(new StaticToolCallbackResolver(toolCallbacks))
+                .build();
+    }
+
+    // ─────────────────────── sync call ───────────────────────
 
     /**
-     * Spring 容器使用的完整 ctor。{@link FunctionCallAggregator} 必须是 Spring bean,
-     * 因为后续 P4 Step 12+ 可能给它注入 {@code ObjectMapper} 或配置项。
+     * 系统 Key 路径(无显式 vendor/model):由 router 解析首选 vendor,
+     * 失败按 {@code spring.ai.fallback-chain} 顺序跳下一跳。
      */
-    public LlmClient(ChatModelRouter router, AiProperties props, FunctionCallAggregator functionCallAggregator) {
-        this.router = router;
-        this.props = props;
-        this.functionCallAggregator = functionCallAggregator;
+    public ChatResponse call(Prompt prompt) {
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(null, null);
+        // Phase 1 — catalog 校验:admin 可在 ai_model_catalog 紧急关停 model,
+        // check 解析后的 primary(vendor + modelName)即可,
+        // 失败直接抛(不走 fallback,用户明确知道请求的是这个 model)。
+        assertModelAllowed(chain.primaryVendor(),
+                chain.iterator().hasNext() ? chain.iterator().next().modelName() : null);
+        return runChain(chain, prompt, "LLM", /* modelArg */ null, chain.primaryVendor());
     }
 
     /**
-     * 单元测试用 2-arg ctor:用 {@code new FunctionCallAggregator()} 兜底。
-     * 聚合器无状态、无 Spring 注入需求(只持有 {@code ObjectMapper}),测试场景直接 {@code new} 即可。
+     * 系统 Key 路径(显式 vendor/model):PreferenceResolver 解析后透传。
+     * model 优先于 yaml default-model。
      */
-    public LlmClient(ChatModelRouter router, AiProperties props) {
-        this(router, props, new FunctionCallAggregator());
+    public ChatResponse call(Prompt prompt, String vendor, String model) {
+        // router 显式接 (vendor, model) 两个参数,不再把 vendor 拼到
+        // prompt.getOptions().getModel() 里 —— Spring AI 透传该字段给上游
+        // API,DeepSeek / OpenAI / Anthropic 不认 "vendor:model" 格式
+        // (报 400 Bad Request)。
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(vendor, model);
+        // Phase 1 — catalog 校验:用户显式请求的 (vendor, model) 必须存在于
+        // catalog 且 enabled=true;不通过直接抛,不进 fallback chain。
+        assertModelAllowed(vendor, model);
+        return runChain(chain, prompt, "LLM pref", model, vendor);
     }
 
     /**
-     * 同步调用门面。
+     * 私 Key 路径:用调用方传入的 {@link ChatModel}(由 {@code VendorChatModelFactory}
+     * 按 sha256(apiKey) 缓存构造,典型实现是 OpenAiChatModel 子类实例)。
+     * 不走降级链、不参与熔断计数。
      *
-     * <p>P4 起按降级链依次尝试每一跳:
-     * <ul>
-     *   <li>首选 vendor 命中熔断(由 {@code router.isPrimaryVendorOpen} 判断) → 跳下一跳</li>
-     *   <li>首选返回 {@link LlmException} 且 {@link ChatModelRouter#isFallbackTriggering}
-     *       判断为"应当降级"的错误码 → 跳下一跳</li>
-     *   <li>其它错误(限流 / 配额 / 参数错 / 配置缺失)直接抛出,不降级 —— 改 vendor 也救不了</li>
-     *   <li>链耗尽 → 抛 {@link LlmException#LLM_ALL_VENDORS_FAILED}</li>
-     * </ul>
-     */
-    public ChatResponse call(ChatRequest request) {
-        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(request);
-        LlmException lastError = null;
-        for (ChatModelRouter.Resolved r : chain) {
-            // 首选 vendor 已熔断 → 不浪费一次 HTTP 调用,直接跳下一跳
-            if (chain.primaryVendor().equals(r.vendor()) && router.isPrimaryVendorOpen(r)) {
-                log.warn("[LLM fallback] 首选 vendor={} 已熔断,跳下一跳", r.vendor());
-                continue;
-            }
-            try {
-                long t = System.currentTimeMillis();
-                ChatResponse resp = r.model().call(withModel(request, r.modelName()));
-                log.info("[LLM] vendor={} model={} latency={}ms tokens={}/{}",
-                        r.vendor(), r.modelName(),
-                        System.currentTimeMillis() - t,
-                        resp.getUsage() == null ? 0 : resp.getUsage().getPromptTokens(),
-                        resp.getUsage() == null ? 0 : resp.getUsage().getCompletionTokens());
-                if (!r.vendor().equals(chain.primaryVendor())) {
-                    log.info("[LLM fallback] 已降级到 vendor={} model={}", r.vendor(), r.modelName());
-                }
-                return resp;
-            } catch (LlmException ex) {
-                lastError = ex;
-                if (!ChatModelRouter.isFallbackTriggering(ex, r.vendor())) {
-                    throw ex;  // 不可降级的错误,直接抛
-                }
-                log.warn("[LLM fallback] vendor={} 失败 code={} detail={},尝试下一跳",
-                        r.vendor(), ex.getCode(), ex.getMessage());
-            }
-        }
-        // 整条链用尽
-        LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
-                "降级链已耗尽,primary=" + chain.primaryVendor());
-        if (lastError != null) ex.initCause(lastError);
-        throw ex;
-    }
-
-    /**
-     * P7 个性化路径:用户私 Key 模式调用。
+     * <p>Phase 1 — catalog 校验 <b>也走</b>:admin disable 是硬门禁,私 Key
+     * 用户也不例外。原因:admin 关停通常是合规/事故场景(模型下架 / 数据泄露
+     * 风险),放私 Key 等于"管理员关了一扇门,用户从后门进"。私 Key 用户的
+     * 兜底是切别的 model(不是切私 Key 绕过 disable)。
      *
-     * <p>与 {@link #call(ChatRequest)} 区别:
-     * <ul>
-     *   <li>不走降级链(用户的 Key 失败就该报给他,不应悄悄切到别人的 Key)</li>
-     *   <li>不参与熔断计数(熔断是平台级 SLO,不应被单用户的私 Key 故障污染)</li>
-     *   <li>错误归一化(超时 / 网络错 → {@link ResultCode#LLM_UPSTREAM_TIMEOUT / LLM_PROVIDER_ERROR})保持一致</li>
-     * </ul>
+     * <p>Phase 3 — catalog 校验用 <b>实际 vendor</b>(从 {@code Resolved} 拿),
+     * 旧实现硬写 {@code "openai"} 是 bug(用户用 deepseek 代理时,实际 vendor 是
+     * deepseek 但 catalog 校验 openai)。新调用方请用
+     * {@link #call(Prompt, ChatModel, String)}。
      */
-    public ChatResponse call(ChatRequest request, ChatModel privateKeyModel) {
-        long t = System.currentTimeMillis();
-        ChatResponse resp;
+    public ChatResponse call(Prompt prompt, ChatModel privateKeyModel) {
+        // 保留旧行为:catalog 校验仍写 "openai"(同 Phase 1)。Phase 3 新调用方
+        // 改用 call(Prompt, ChatModel, String actualVendor) 拿到正确 vendor。
+        String model = privateKeyModel.getClass().getSimpleName();
+        String vendor = "openai";
+        String modelName = extractModelName(prompt);
+        assertModelAllowed(vendor, modelName);
+        long t0 = System.currentTimeMillis();
         try {
-            resp = privateKeyModel.call(withModel(request, /* modelName */ privateKeyDefaultModel(privateKeyModel)));
+            ChatResponse resp = callWithToolLoop(prompt, privateKeyModel);
+            log.info("[LLM private] model={} latency={}ms tokens={}/{}",
+                    resp.getMetadata() != null ? resp.getMetadata().getModel() : "?",
+                    System.currentTimeMillis() - t0,
+                    extractPromptTokens(resp), extractCompletionTokens(resp));
+            return resp;
         } catch (LlmException e) {
             throw e;
         } catch (Exception e) {
-            throw new LlmException(ResultCode.LLM_PROVIDER_ERROR, "私 Key 调用失败: " + e.getMessage());
+            throw new LlmException(ResultCode.LLM_PROVIDER_ERROR,
+                    "私 Key 调用失败: " + e.getMessage());
         }
-        log.info("[LLM private] vendor={} model={} latency={}ms tokens={}/{}",
-                privateKeyModel.name(),
-                resp.getModel(),
-                System.currentTimeMillis() - t,
-                resp.getUsage() == null ? 0 : resp.getUsage().getPromptTokens(),
-                resp.getUsage() == null ? 0 : resp.getUsage().getCompletionTokens());
-        return resp;
     }
 
     /**
-     * P7 系统 Key 路径:由 PreferenceResolver 解析出 vendor/model 后透传。
+     * Phase 3 — 私 Key 路径(显式实际 vendor)。
      *
-     * <p>与 {@link #call(ChatRequest)} 区别:
+     * <p>跟 {@link #call(Prompt, ChatModel)} 的唯一差异:catalog 校验用
+     * {@code actualVendor}(从 {@link com.nexusforge.ai.service.PreferenceResolver.Resolved}
+     * 拿),而不是硬写 {@code "openai"}。新调用方必须用本重载 — 用户走
+     * {@code user_ai_proxy}(deepseek / dashscope / glm 等任意 OpenAI 兼容 vendor)
+     * 时,catalog 校验要按实际 vendor 查,否则 admin 禁用 deepseek 模型时
+     * 私 Key 用户仍能调通,绕过了合规门禁。
+     *
+     * <p>调用前请确保 {@code prompt.getOptions().getModel()} 已由调用方设置
+     * (用 {@link #withModelInOptions} 或 upstream controller)— 私 Key 路径
+     * 不像系统路径那样从 yaml default-model 兜底。
+     */
+    public ChatResponse call(Prompt prompt, ChatModel privateKeyModel, String actualVendor) {
+        String modelName = extractModelName(prompt);
+        assertModelAllowed(actualVendor, modelName);
+        long t0 = System.currentTimeMillis();
+        try {
+            ChatResponse resp = callWithToolLoop(prompt, privateKeyModel);
+            log.info("[LLM private] vendor={} model={} latency={}ms tokens={}/{}",
+                    actualVendor,
+                    resp.getMetadata() != null ? resp.getMetadata().getModel() : "?",
+                    System.currentTimeMillis() - t0,
+                    extractPromptTokens(resp), extractCompletionTokens(resp));
+            return resp;
+        } catch (LlmException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new LlmException(ResultCode.LLM_PROVIDER_ERROR,
+                    "私 Key 调用失败: " + e.getMessage());
+        }
+    }
+
+    // ─────────────────────── stream ───────────────────────
+
+    /**
+     * 系统 Key 流式:走降级链(只对"首 chunk 之前"发生的错误降级)。
+     */
+    public Flux<ChatResponse> stream(Prompt prompt) {
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(null, null);
+        // Phase 1 — catalog 校验 primary
+        assertModelAllowed(chain.primaryVendor(),
+                chain.iterator().hasNext() ? chain.iterator().next().modelName() : null);
+        ChatModelRouter.Resolved resolved = pickFirstUsableHop(chain);
+        if (resolved == null) {
+            return Flux.error(new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
+                    "降级链全部熔断或未配置"));
+        }
+        return wrapStream(systemKeyFactory.resolveOrCreate(resolved.vendor()).stream(prompt), "LLM stream", resolved);
+    }
+
+    /**
+     * 系统 Key 流式(显式 vendor/model)。
+     */
+    public Flux<ChatResponse> stream(Prompt prompt, String vendor, String model) {
+        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(vendor, model);
+        // Phase 1 — catalog 校验 explicit
+        assertModelAllowed(vendor, model);
+        ChatModelRouter.Resolved r = pickFirstUsableHop(chain);
+        if (r == null) {
+            return Flux.error(new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
+                    "降级链全部熔断或未配置"));
+        }
+        // 降级跳到非请求 vendor 时,rebuild options 适配新 ChatModel 期望的 ChatOptions 类型
+        // —— Spring AI 2.0 各 vendor 的 ChatModel 对自己的 ChatOptions 子类硬转,
+        // 跨 vendor 喂就 ClassCastException(见 withModelInOptions 的注释)。
+        // model 字段用纯模型名(r.modelName() 或用户传的 model),不拼 vendor 前缀。
+        if (!r.vendor().equalsIgnoreCase(vendor)) {
+            log.info("[LLM stream pref] hop vendor={} 不同于 requested vendor={},rebuild options for new vendor",
+                    r.vendor(), vendor);
+        }
+        String effectiveModel = r.vendor().equalsIgnoreCase(vendor) && model != null && !model.isBlank()
+                ? model
+                : r.modelName();
+        Prompt callPrompt = withModelInOptions(prompt, r.vendor(), effectiveModel);
+        return wrapStream(systemKeyFactory.resolveOrCreate(r.vendor()).stream(callPrompt), "LLM stream pref", r);
+    }
+
+    /**
+     * 私 Key 流式:不走降级链、不参与熔断。
+     *
+     * <p>Phase 1 — catalog 校验也走(跟 sync 私 Key 路径一致)。
+     */
+    public Flux<ChatResponse> stream(Prompt prompt, ChatModel privateKeyModel) {
+        String vendor = "openai";
+        String modelName = extractModelName(prompt);
+        assertModelAllowed(vendor, modelName);
+        return wrapStream(privateKeyModel.stream(prompt), "LLM stream private",
+                /* resolved */ null);
+    }
+
+    /**
+     * Phase 3 — 私 Key 流式(显式实际 vendor)。
+     *
+     * <p>跟 {@link #stream(Prompt, ChatModel)} 的差异:catalog 校验用
+     * {@code actualVendor}(从 {@code Resolved} 拿),而不是硬写 {@code "openai"}。
+     * 新调用方(走 {@code user_ai_proxy} 多代理)必须用本重载。
+     */
+    public Flux<ChatResponse> stream(Prompt prompt, ChatModel privateKeyModel, String actualVendor) {
+        String modelName = extractModelName(prompt);
+        assertModelAllowed(actualVendor, modelName);
+        return wrapStream(privateKeyModel.stream(prompt), "LLM stream private",
+                /* resolved */ null);
+    }
+
+    // ─────────────────────── catalog 校验 ───────────────────────
+
+    /**
+     * Phase 1 — 检查 (vendor, model) 是否在 model catalog 中且 enabled。
+     * 不通过抛 {@link LlmException}:
      * <ul>
-     *   <li>绕开 {@link ChatModelRouter} 的 yaml-default 兜底(那是 vendor 级 fallback,
-     *       不是请求级偏好),让 ai_global_default.model 或 user_ai_preference.model
-     *       成为唯一权威。</li>
-     *   <li>仍然走降级链(系统 Key 失败时,允许切到下一个 vendor)。</li>
-     *   <li>不接私 Key —— 私 Key 路径请用 {@link #call(ChatRequest, ChatModel)}。</li>
+     *   <li>不存在 → {@code LLM_MODEL_NOT_FOUND(3002)}</li>
+     *   <li>存在但 enabled=false → {@code LLM_MODEL_DISABLED(3011)}</li>
      * </ul>
      *
-     * @param request    原始 ChatRequest(model 字段会被本方法覆盖成 {@code model})
-     * @param vendor     resolved.vendor,如 "qwen"
-     * @param model      resolved.model,如 "qwen-turbo";非空时优先于 yaml default
+     * <p>{@code vendor} / {@code model} 任一为 null/blank 时跳过校验(由调用方
+     * 决定是否需要校验;router.resolveWithFallback 内部会做兜底)。
      */
-    public ChatResponse call(ChatRequest request, String vendor, String model) {
-        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(
-                withModel(request, vendor + ":" + (model == null ? "" : model)));
+    private void assertModelAllowed(String vendor, String model) {
+        if (vendor == null || vendor.isBlank() || model == null || model.isBlank()) {
+            return;
+        }
+        AiModelCatalog catalog = modelCatalogService.findByVendorModel(vendor, model);
+        if (catalog == null) {
+            throw new LlmException(ResultCode.LLM_MODEL_NOT_FOUND,
+                    "vendor=" + vendor + " model=" + model + " 不在 model catalog 中");
+        }
+        if (Boolean.FALSE.equals(catalog.getEnabled())) {
+            throw new LlmException(ResultCode.LLM_MODEL_DISABLED,
+                    "vendor=" + vendor + " model=" + model + " 已被管理员禁用");
+        }
+    }
+
+    /**
+     * 从 Prompt 的 ChatOptions 拿 model 名(私 Key 路径用)。
+     * OpenAI 协议:options.getModel() 存的是上游 API 期望的 model 名。
+     */
+    private static String extractModelName(Prompt prompt) {
+        ChatOptions opts = prompt.getOptions();
+        if (opts == null) return null;
+        try {
+            return opts.getModel();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // ─────────────────────── 内部 helper ───────────────────────
+
+    /**
+     * 跑降级链:链上每个 hop 依次尝试,命中熔断或抛触发降级的错误就跳下一跳,
+     * 链耗尽抛 {@link ResultCode#LLM_ALL_VENDORS_FAILED}。
+     *
+     * <p>每个 hop 内部走 {@link #callWithToolLoop},自动获得 tool 调用回路。
+     *
+     * <p>per-hop rebuild:每个 hop 用自己 vendor 对应的 {@link ChatOptions} 子类
+     * 重新包 prompt —— 跨 vendor 喂会 ClassCastException(见 {@link #withModelInOptions}
+     * 注释)。对首选 hop 用用户传入的 {@code modelArg},对降级 hop 用 yaml 的
+     * {@code providers[vendor].default-model}。
+     */
+    private ChatResponse runChain(ChatModelRouter.FallbackChain chain,
+                                   Prompt originalPrompt,
+                                   String logTag, String modelArg,
+                                   String requestedVendor) {
         LlmException lastError = null;
         for (ChatModelRouter.Resolved r : chain) {
-            if (chain.primaryVendor().equals(r.vendor()) && router.isPrimaryVendorOpen(r)) {
-                log.warn("[LLM fallback] 首选 vendor={} 已熔断,跳下一跳", r.vendor());
+            if (router.isPrimaryVendorOpen(r)) {
+                log.warn("[{} fallback] 首选 vendor={} 已熔断,跳下一跳", logTag, r.vendor());
                 continue;
             }
+            // Per-hop rebuild: 适配每个 hop 的 ChatModel 期望的 ChatOptions 类型
+            String effectiveModel = (r.vendor().equalsIgnoreCase(requestedVendor) && modelArg != null)
+                    ? modelArg : r.modelName();
+            Prompt hopPrompt = withModelInOptions(originalPrompt, r.vendor(), effectiveModel);
             try {
-                long t = System.currentTimeMillis();
-                // buildPrefRequest:把 model 写进 req.options["model"] 让 mapper 优先读;
-                // 同时保留 req.model(给 router 路由用)。model == null 时不让它进 options,
-                // 让 mapper fallback 到 yaml default(此时 PreferenceResolver 不应返回 null)
-                ChatResponse resp = r.model().call(buildPrefRequest(request, model));
-                log.info("[LLM pref] vendor={} model={} latency={}ms tokens={}/{}",
-                        r.vendor(), model,
-                        System.currentTimeMillis() - t,
-                        resp.getUsage() == null ? 0 : resp.getUsage().getPromptTokens(),
-                        resp.getUsage() == null ? 0 : resp.getUsage().getCompletionTokens());
+                long t0 = System.currentTimeMillis();
+                ChatResponse resp = callWithToolLoop(hopPrompt, systemKeyFactory.resolveOrCreate(r.vendor()));
+                log.info("[{}] vendor={} model={} latency={}ms tokens={}/{}",
+                        logTag, r.vendor(), r.modelName(),
+                        System.currentTimeMillis() - t0,
+                        extractPromptTokens(resp), extractCompletionTokens(resp));
                 if (!r.vendor().equals(chain.primaryVendor())) {
-                    log.info("[LLM fallback] 已降级到 vendor={} model={}", r.vendor(), model);
+                    log.info("[{} fallback] 已降级到 vendor={} model={}", logTag, r.vendor(), r.modelName());
                 }
                 return resp;
             } catch (LlmException ex) {
@@ -201,8 +348,8 @@ public class LlmClient {
                 if (!ChatModelRouter.isFallbackTriggering(ex, r.vendor())) {
                     throw ex;
                 }
-                log.warn("[LLM fallback] vendor={} 失败 code={} detail={},尝试下一跳",
-                        r.vendor(), ex.getCode(), ex.getMessage());
+                log.warn("[{} fallback] vendor={} 失败 code={} detail={},尝试下一跳",
+                        logTag, r.vendor(), ex.getCode(), ex.getMessage());
             }
         }
         LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
@@ -212,178 +359,7 @@ public class LlmClient {
     }
 
     /**
-     * 构造 P7 系统 Key 路径下的 ChatRequest 副本:把 {@code model} 塞进 {@code options["model"]},
-     * 让 {@code OpenAiJsonMapper.toOpenAi} 在解析时优先用这个值(yaml 兜底之后)。
-     * 其它字段(messages / temperature / maxTokens / stream / tools)与 src 一致。
-     */
-    private ChatRequest buildPrefRequest(ChatRequest src, String model) {
-        Map<String, Object> opts = src.getOptions() == null
-                ? new HashMap<>()
-                : new HashMap<>(src.getOptions());
-        if (model != null && !model.isBlank()) {
-            opts.put("model", model);
-        }
-        return ChatRequest.builder()
-                .model(src.getModel())
-                .messages(src.getMessages())
-                .temperature(src.getTemperature())
-                .maxTokens(src.getMaxTokens())
-                .stream(src.getStream())
-                .options(opts)
-                .tools(src.getTools())
-                .build();
-    }
-
-    /** 从 ChatModel 名字推 modelName(避免 ChatRequest 重复声明) */
-    private static String privateKeyDefaultModel(ChatModel m) {
-        // ChatModel SPI 的 vendor 名已知;具体 model 由 ChatRequest 自身的 model 字段决定
-        // (ChatModel.call 内部会用 cfg.defaultModel 兜底)。这里返回 null 表示"沿用 request.model"。
-        return null;
-    }
-
-    /**
-     * 流式调用门面。
-     *
-     * <p>P2 增强:
-     * <ul>
-     *   <li>由 {@link com.nexusforge.ai.model.ChatModel#stream} 设置 {@code request.stream=true}
-     *       并下发;调用方无需预填。</li>
-     *   <li>在门面层套一层 {@link Flux#timeout(Duration)},作为整流总时长的兜底;
-     *       超时映射成 {@link StreamTimeoutException} → {@code LLM_UPSTREAM_TIMEOUT}。</li>
-     *   <li>{@code doFinally} 信号日志(vendor / model / signal / token 总数),
-     *       用于可观测性与排障。</li>
-     *   <li>现有 {@link LlmException} 透传,不做包装。</li>
-     * </ul>
-     *
-     * <p>P4 增强:按降级链展开;流式只对"首 chunk 之前"发生的错误降级;
-     * 一旦开始推数据,SSE 已经断开重连代价高,直接让 {@code Flux.error} 透传到上层,
-     * 不切换 vendor(避免内容重复)。
-     *
-     * <p>取消语义:订阅方 dispose → Reactor 上游取消 → WebClient 关闭连接,无泄漏。
-     * 计时器在 dispose 后自动清理。
-     */
-    public Flux<ChatChunk> stream(ChatRequest request) {
-        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(request);
-        Duration timeout = props.getRequestTimeout();
-
-        // 降级链只考虑"还没开始推数据"的失败;首选 vendor 熔断就直接跳下一跳
-        ChatModelRouter.Resolved resolved = pickFirstUsableHop(chain);
-        if (resolved == null) {
-            LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
-                    "降级链全部熔断或未配置");
-            return Flux.error(ex);
-        }
-        if (!resolved.vendor().equals(chain.primaryVendor())) {
-            log.info("[LLM stream fallback] 已降级到 vendor={} model={}",
-                    resolved.vendor(), resolved.modelName());
-        }
-        ChatRequest req = withModel(request, resolved.modelName());
-        req.setStream(Boolean.TRUE);
-
-        // 累计 usage 的小累加器:流结束(complete / cancel / error)时打印总账
-        AtomicLong promptTokens = new AtomicLong();
-        AtomicLong completionTokens = new AtomicLong();
-
-        return resolved.model().stream(req)
-                .timeout(timeout)
-                .doOnNext(chunk -> {
-                    if (chunk.getUsage() != null) {
-                        promptTokens.addAndGet(chunk.getUsage().getPromptTokens() == null
-                                ? 0L : chunk.getUsage().getPromptTokens());
-                        completionTokens.addAndGet(chunk.getUsage().getCompletionTokens() == null
-                                ? 0L : chunk.getUsage().getCompletionTokens());
-                    }
-                })
-                .doFinally(sig -> log.info(
-                        "[LLM stream] vendor={} model={} signal={} tokens={}/{}",
-                        resolved.vendor(), resolved.modelName(), sig,
-                        promptTokens.get(), completionTokens.get()))
-                // P4 Step 11:在出口聚合 delta.tool_calls 增量 → 终止帧的 toolCalls 列表。
-                // 放在 doFinally 之后,这样 use 量统计仍然反映 provider 真实帧数;
-                // 放在 onErrorMap 之前,这样上游 Flux.error 透传(无终止帧时不补帧)。
-                .transform(functionCallAggregator::aggregate)
-                .onErrorMap(err -> mapStreamError(err, timeout));
-    }
-
-    /**
-     * P7 个性化路径:用户私 Key 模式流式调用。
-     *
-     * <p>不走降级链、不参与熔断计数;保留 timeout + 用量累加日志。
-     */
-    public Flux<ChatChunk> stream(ChatRequest request, ChatModel privateKeyModel) {
-        Duration timeout = props.getRequestTimeout();
-        ChatRequest req = withModel(request, null);
-        req.setStream(Boolean.TRUE);
-
-        AtomicLong promptTokens = new AtomicLong();
-        AtomicLong completionTokens = new AtomicLong();
-
-        return privateKeyModel.stream(req)
-                .timeout(timeout)
-                .doOnNext(chunk -> {
-                    if (chunk.getUsage() != null) {
-                        promptTokens.addAndGet(chunk.getUsage().getPromptTokens() == null
-                                ? 0L : chunk.getUsage().getPromptTokens());
-                        completionTokens.addAndGet(chunk.getUsage().getCompletionTokens() == null
-                                ? 0L : chunk.getUsage().getCompletionTokens());
-                    }
-                })
-                .doFinally(sig -> log.info(
-                        "[LLM stream private] vendor={} model={} signal={} tokens={}/{}",
-                        privateKeyModel.name(), req.getModel(), sig,
-                        promptTokens.get(), completionTokens.get()))
-                .transform(functionCallAggregator::aggregate)
-                .onErrorMap(err -> mapStreamError(err, timeout));
-    }
-
-    /**
-     * P7 系统 Key 路径流式:由 PreferenceResolver 解析 vendor/model。
-     *
-     * <p>走降级链(系统 Key 失败时切下一个 vendor),但 model 用 PreferenceResolver
-     * 透传的 {@code model}(来自 ai_global_default 或 user_ai_preference),不会被
-     * yaml 的 default-model 覆盖。
-     */
-    public Flux<ChatChunk> stream(ChatRequest request, String vendor, String model) {
-        Duration timeout = props.getRequestTimeout();
-        ChatModelRouter.FallbackChain chain = router.resolveWithFallback(
-                withModel(request, vendor + ":" + (model == null ? "" : model)));
-
-        ChatModelRouter.Resolved resolved = pickFirstUsableHop(chain);
-        if (resolved == null) {
-            LlmException ex = new LlmException(ResultCode.LLM_ALL_VENDORS_FAILED,
-                    "降级链全部熔断或未配置");
-            return Flux.error(ex);
-        }
-        if (!resolved.vendor().equals(chain.primaryVendor())) {
-            log.info("[LLM stream fallback] 已降级到 vendor={} model={}",
-                    resolved.vendor(), model);
-        }
-        ChatRequest req = buildPrefRequest(request, model);
-        req.setStream(Boolean.TRUE);
-
-        AtomicLong promptTokens = new AtomicLong();
-        AtomicLong completionTokens = new AtomicLong();
-
-        return resolved.model().stream(req)
-                .timeout(timeout)
-                .doOnNext(chunk -> {
-                    if (chunk.getUsage() != null) {
-                        promptTokens.addAndGet(chunk.getUsage().getPromptTokens() == null
-                                ? 0L : chunk.getUsage().getPromptTokens());
-                        completionTokens.addAndGet(chunk.getUsage().getCompletionTokens() == null
-                                ? 0L : chunk.getUsage().getCompletionTokens());
-                    }
-                })
-                .doFinally(sig -> log.info(
-                        "[LLM stream pref] vendor={} model={} signal={} tokens={}/{}",
-                        resolved.vendor(), model, sig,
-                        promptTokens.get(), completionTokens.get()))
-                .transform(functionCallAggregator::aggregate)
-                .onErrorMap(err -> mapStreamError(err, timeout));
-    }
-
-    /**
-     * 从链头开始挑第一个未熔断的 hop。若全部熔断返回 null。
+     * 链上挑第一个未熔断的 hop。
      */
     private ChatModelRouter.Resolved pickFirstUsableHop(ChatModelRouter.FallbackChain chain) {
         for (ChatModelRouter.Resolved r : chain) {
@@ -396,17 +372,33 @@ public class LlmClient {
     }
 
     /**
-     * 流错误归一化:
-     * <ul>
-     *   <li>{@link LlmException} 直接抛(已带业务 code)</li>
-     *   <li>{@link TimeoutException} → {@link StreamTimeoutException}</li>
-     *   <li>其它 → 透传,让 GlobalExceptionHandler 兜底为 {@code LLM_PROVIDER_ERROR}</li>
-     * </ul>
+     * 把流式输出包一层:超时、用量累加日志、错误归一。
+     * resolved=null 时(私 Key 路径)日志显示 "(private)"。
      */
+    private Flux<ChatResponse> wrapStream(Flux<ChatResponse> upstream,
+                                          String logTag,
+                                          ChatModelRouter.Resolved resolved) {
+        Duration timeout = props.getRequestTimeout();
+        AtomicLong promptTokens = new AtomicLong();
+        AtomicLong completionTokens = new AtomicLong();
+        String vendorLabel = resolved != null ? resolved.vendor() : "(private)";
+        String modelLabel = resolved != null ? resolved.modelName() : "(private)";
+        return upstream
+                .timeout(timeout)
+                .doOnNext(c -> {
+                    Integer pt = extractPromptTokensObj(c);
+                    Integer ct = extractCompletionTokensObj(c);
+                    if (pt != null) promptTokens.addAndGet(pt.longValue());
+                    if (ct != null) completionTokens.addAndGet(ct.longValue());
+                })
+                .doFinally(sig -> log.info("[{}] vendor={} model={} signal={} tokens={}/{}",
+                        logTag, vendorLabel, modelLabel,
+                        sig, promptTokens.get(), completionTokens.get()))
+                .onErrorMap(err -> mapStreamError(err, timeout));
+    }
+
     private static Throwable mapStreamError(Throwable err, Duration timeout) {
-        if (err instanceof LlmException) {
-            return err;
-        }
+        if (err instanceof LlmException) return err;
         if (err instanceof TimeoutException) {
             return new StreamTimeoutException("流式调用超过 " + timeout.toMillis() + "ms");
         }
@@ -414,124 +406,184 @@ public class LlmClient {
     }
 
     /**
-     * 把 ChatRequest.model 替换为 router 解析后的具体 model(去掉 vendor 前缀)
+     * 把 model 名写进 prompt 的 ChatOptions(typed interface),并按 vendor 选
+     * 对应 {@link ChatOptions} 子类。
+     *
+     * <p>关键约束:写入 {@code prompt.getOptions().getModel()} 的字段必须是
+     * <b>纯模型名</b>(e.g. {@code "deepseek-v4-flash"}),不能带 {@code vendor:}
+     * 前缀 —— Spring AI 透传该字段给上游 API,DeepSeek / OpenAI / Anthropic
+     * 都不认带冒号的 model 名称,会直接 400 Bad Request。
+     *
+     * <p>Spring AI 2.0 用 {@code ChatOptions#mutate()} 替代了 1.x 的
+     * {@code OpenAiChatOptions.fromOptions(...)} — 通用 builder 路径,
+     * 各厂商 ChatOptions 实现都支持。{@code ChatOptions.mutate()} 返回
+     * {@code ChatOptions.Builder<?>},可以直接 {@code .model(name).build()}。
+     *
+     * <p><b>Vendor 分发</b>:Spring AI 2.0 的 3 个 vendor ChatOptions 互不继承 —
+     * {@code OpenAiChatOptions} / {@code AnthropicChatOptions} /
+     * {@code OllamaChatOptions} 都是 {@code ToolCallingChatOptions +
+     * StructuredOutputChatOptions} 的直接实现。Spring AI 官方 starter 提供
+     * 的 {@code OpenAiChatModel.call(Prompt)} 内部会把
+     * {@code prompt.getOptions()} 硬转 {@code OpenAiChatOptions} —
+     * 之前一律用 {@code OpenAiChatOptions} 在 anthropic 路径下会 ClassCast;
+     * deepseek 之前是 {@code DeepSeekChatModel} 硬转 {@code DeepSeekChatOptions},
+     * 现在 deepseek 已统一走 OpenAI starter(见 build.gradle),所以也是
+     * {@code OpenAiChatOptions}。本方法按 vendor 分发到正确的子类构造器,
+     * 见 {@link #builderForVendor}。
+     *
+     * <p><b>Phase 3 起改为 {@code public}</b> — 私 Key 路径(走 {@code user_ai_proxy}
+     * 时)由 controller / ConversationService 在调 {@code call(Prompt, ChatModel, vendor)}
+     * 之前显式把 model 写入 prompt options;模型不再由 factory 内部硬写,需要外部调用
+     * 本方法。
      */
-    private ChatRequest withModel(ChatRequest src, String modelName) {
-        return ChatRequest.builder()
-                .model(modelName)
-                .messages(src.getMessages())
-                .temperature(src.getTemperature())
-                .maxTokens(src.getMaxTokens())
-                .stream(src.getStream())
-                .options(src.getOptions())
-                .tools(src.getTools())
-                .build();
+    public static Prompt withModelInOptions(Prompt src, String vendor, String model) {
+        if (model == null || model.isBlank()) return src;
+        ChatOptions opts = src.getOptions();
+        if (opts == null) {
+            opts = builderForVendor(vendor).model(model).build();
+        } else {
+            opts = opts.mutate().model(model).build();
+        }
+        return new Prompt(src.getInstructions(), opts);
     }
 
-    // ──────────────────────────────────────────────
-    // P4 Step 12:Function Calling 闭环
-    // ──────────────────────────────────────────────
-
     /**
-     * 系统 Key 路径:走降级链,命中 {@code finishReason="tool_calls"} 时自动执行工具、
-     * 回灌 TOOL 消息、再调一次,直到返回 {@code stop} 或达到 {@code maxTurns} 上限。
+     * 按 vendor 名路由到对应的 {@link ChatOptions} 构造器。
      *
-     * <p>当前请求 {@code finishReason != "tool_calls"} 或 {@code toolCalls} 为空时,
-     * 行为完全等同 {@link #call(ChatRequest)} —— 不会修改原始 {@code request}。
-     */
-    public ChatResponse callWithToolLoop(ChatRequest req, ToolRegistry registry, int maxTurns) {
-        ChatResponse resp = call(req);
-        return runToolLoop(req, resp, this::call, registry, maxTurns);
-    }
-
-    /**
-     * 私 Key 路径:与 {@link #callWithToolLoop(ChatRequest, ToolRegistry, int)} 行为一致,
-     * 但每次重调走 {@link #call(ChatRequest, ChatModel)} —— 不走降级链、不污染熔断计数。
-     */
-    public ChatResponse callWithToolLoop(ChatRequest req, ChatModel privateKeyModel,
-                                         ToolRegistry registry, int maxTurns) {
-        ChatResponse resp = call(req, privateKeyModel);
-        return runToolLoop(req, resp, r -> call(r, privateKeyModel), registry, maxTurns);
-    }
-
-    /**
-     * 工具调用循环主体。共享给系统路径({@code this::call})和私 Key 路径
-     * ({@code r -> call(r, privateKeyModel)})。
-     *
-     * <p>循环条件:尚未达到 {@code maxTurns} + 当前响应 {@code finishReason="tool_calls"}
-     * 且 {@code toolCalls} 非空。每轮:
-     * <ol>
-     *   <li>把当前 assistant 消息(含 {@code toolCalls})追加到消息尾部</li>
-     *   <li>按 {@code toolCall.id} 一一执行工具,执行结果回灌为 {@code role=TOOL} 消息</li>
-     *   <li>用更新后的消息集构造新 ChatRequest,经 {@code reCall} 再调一次 LLM</li>
-     * </ol>
-     *
-     * <p>边界:
+     * <p>覆盖:
      * <ul>
-     *   <li>工具名未注册或抛异常 → 注入 {@code ToolResult.error(...)} 让模型看到失败信息,而不是默默结束</li>
-     *   <li>达到 {@code maxTurns} 仍返回 {@code tool_calls} → 返回最后一次响应(可能 {@code content=null})</li>
-     *   <li>循环过程中构造的新 ChatRequest 是副本,原始 {@code req} 不被 mutate</li>
+     *   <li>{@code anthropic} → {@link AnthropicChatOptions}(独立 starter,
+     *       走 Anthropic Messages 协议)</li>
+     *   <li>其他(openai / deepseek / ollama / 中转站 / 国内 OpenAI 兼容)→
+     *       {@link OpenAiChatOptions}(都走 OpenAI Chat Completions 协议家族,
+     *       共用 OpenAiChatModel — DeepSeek 之前是 {@code DeepSeekChatOptions},
+     *       现在已统一到 OPENAI 协议,见 build.gradle 注释)</li>
      * </ul>
+     * 未识别的 vendor 名 / {@code null} / 空串都默认走 OpenAI 协议家族。
+     *
+     * <p>qwen / DashScope 不在本列表(走的是 Spring AI Alibaba 社区,不在 Spring AI 官方
+     * starter 生态,暂不接入),如启用需先确认有对应 ChatModel bean 注入。
      */
-    private ChatResponse runToolLoop(ChatRequest req, ChatResponse resp,
-                                     Function<ChatRequest, ChatResponse> reCall,
-                                     ToolRegistry registry, int maxTurns) {
-        int turn = 1;
-        while (turn < maxTurns
-                && "tool_calls".equals(resp.getFinishReason())
-                && resp.getToolCalls() != null
-                && !resp.getToolCalls().isEmpty()) {
-            log.info("[ToolLoop] turn={}/{} toolCalls={}", turn, maxTurns, resp.getToolCalls().size());
+    static ChatOptions.Builder<?> builderForVendor(String vendor) {
+        String v = vendor == null ? "" : vendor.toLowerCase(Locale.ROOT);
+        return switch (v) {
+            case "anthropic" -> AnthropicChatOptions.builder();
+            default -> OpenAiChatOptions.builder();
+        };
+    }
 
-            List<ChatMessage> msgs = new ArrayList<>(req.getMessages());
-            // 1. 把当前 assistant 消息(带 toolCalls)回灌
-            msgs.add(ChatMessage.builder()
-                    .role(Role.ASSISTANT)
-                    .content(resp.getContent())
-                    .toolCalls(resp.getToolCalls())
-                    .build());
-            // 2. 一一执行工具,把结果回灌为 TOOL 消息
-            for (ToolCall tc : resp.getToolCalls()) {
-                ToolResult result;
-                try {
-                    ToolExecutor exec = registry.lookup(tc.getName());
-                    if (exec == null) {
-                        log.warn("[ToolLoop] tool={} 未注册,注入错误结果", tc.getName());
-                        result = ToolResult.error("Unknown tool: " + tc.getName());
-                    } else {
-                        result = exec.execute(tc.getArguments());
-                    }
-                } catch (Exception e) {
-                    log.warn("[ToolLoop] tool={} 抛出异常: {}", tc.getName(), e.toString());
-                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    result = ToolResult.error(msg);
-                }
-                log.info("[ToolLoop] turn={} tool={} id={} isError={} contentLen={}",
-                        turn, tc.getName(), tc.getId(), result.isError(), result.content().length());
-                msgs.add(ChatMessage.builder()
-                        .role(Role.TOOL)
-                        .name(tc.getId())
-                        .content(result.content())
-                        .build());
+    // ─────────────────────── tool loop ───────────────────────
+
+    /**
+     * 工具循环:调 {@link ChatModel#call(Prompt)},如果 response 含 tool calls
+     * 就用 {@link ToolCallingManager#executeToolCalls(Prompt, ChatResponse)}
+     * 执行工具并把结果塞回 prompt,再 call,直到响应不再含 tool calls 或达到
+     * {@link AiProperties#getMaxToolIterations()} 安全上限。
+     *
+     * <p>调用前先把 {@link #toolCallbacks} 注入到 prompt 的 ChatOptions,这样
+     * LLM 才知道有哪些工具可用(否则 LLM 永远不会主动调工具)。
+     *
+     * <p>{@link #toolCallbacks} 为空时,等价于单次 {@code chatModel.call(prompt)},
+     * 零开销。
+     */
+    public ChatResponse callWithToolLoop(Prompt prompt, ChatModel chatModel) {
+        if (toolCallbacks.isEmpty()) {
+            return chatModel.call(prompt);
+        }
+        Prompt enriched = enrichPromptWithToolCallbacks(prompt);
+        ChatResponse response = chatModel.call(enriched);
+        int maxIter = Math.max(1, props.getMaxToolTurns());
+        int iter = 0;
+        while (hasToolCalls(response) && iter < maxIter) {
+            iter++;
+            log.info("[LLM tool loop] iter={}/{} vendor=({}) 含 {} 个 tool_call",
+                    iter, maxIter, chatModel.getClass().getSimpleName(),
+                    countToolCalls(response));
+            try {
+                ToolExecutionResult result = toolCallingManager.executeToolCalls(enriched, response);
+                enriched = new Prompt(result.conversationHistory(), enriched.getOptions());
+                response = chatModel.call(enriched);
+            } catch (Exception e) {
+                // 工具执行异常 — 不应该把 LLM 卡死,记日志后返回当前 response。
+                // 异常内容已通过 ToolExecutionExceptionProcessor 写进 tool result 里
+                // 喂给 LLM(如果 LLM 仍想继续循环),这里额外兜底一层,避免循环死。
+                log.warn("[LLM tool loop] 工具执行异常,中断循环: {}", e.toString());
+                break;
             }
+        }
+        if (iter >= maxIter && hasToolCalls(response)) {
+            log.warn("[LLM tool loop] 达到 maxIter={} 上限,强制返回最后响应(可能含未执行的 tool_call)", maxIter);
+        }
+        return response;
+    }
 
-            // 3. 用更新后的消息集构造新 ChatRequest(保留 model / tools / options 等)
-            req = ChatRequest.builder()
-                    .model(req.getModel())
-                    .messages(msgs)
-                    .temperature(req.getTemperature())
-                    .maxTokens(req.getMaxTokens())
-                    .stream(req.getStream())
-                    .options(req.getOptions())
-                    .tools(req.getTools())
+    /** 把 toolCallbacks 注入 prompt 的 ChatOptions,让 LLM 知道有哪些工具可用。 */
+    private Prompt enrichPromptWithToolCallbacks(Prompt prompt) {
+        ChatOptions opts = prompt.getOptions();
+        if (opts == null) {
+            opts = org.springframework.ai.openai.OpenAiChatOptions.builder()
+                    .toolCallbacks(toolCallbacks)
                     .build();
-            // 4. 再调一次
-            resp = reCall.apply(req);
-            turn++;
+            return new Prompt(prompt.getInstructions(), opts);
         }
-        if ("tool_calls".equals(resp.getFinishReason())) {
-            log.warn("[ToolLoop] 已达 maxTurns={} 仍未终止(仍为 tool_calls),直接返回最后一次响应", maxTurns);
+        if (opts instanceof ToolCallingChatOptions tco) {
+            // ToolCallingChatOptions 没有 setter,只能通过 mutate() 重建
+            // 一次,得到含 toolCallbacks 的新 options(底层实现是
+            // TypedBeanPropertyMapper 复制字段,不会丢原有 model / temperature 等)。
+            ChatOptions enriched = tco.mutate()
+                    .toolCallbacks(toolCallbacks)
+                    .build();
+            return new Prompt(prompt.getInstructions(), enriched);
         }
-        return resp;
+        // 非 ToolCallingChatOptions 的 options(罕见)直接返回原 prompt,
+        // 这种情况 LLM 看不到工具但也不报错,跟改前行为一致。
+        return prompt;
+    }
+
+    private static boolean hasToolCalls(ChatResponse response) {
+        if (response == null || response.getResults() == null) return false;
+        for (Generation g : response.getResults()) {
+            if (g.getOutput() instanceof AssistantMessage am && !am.getToolCalls().isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int countToolCalls(ChatResponse response) {
+        if (response == null || response.getResults() == null) return 0;
+        int n = 0;
+        for (Generation g : response.getResults()) {
+            if (g.getOutput() instanceof AssistantMessage am) {
+                n += am.getToolCalls().size();
+            }
+        }
+        return n;
+    }
+
+    // ─────────────────────── 数字提取 ───────────────────────
+    // Spring AI 2.0 的 Usage#getPromptTokens/getCompletionTokens/getTotalTokens
+    // 返回 Integer(不是 1.x 时的 Long)。此处用 Integer 中转,转 long 时 .longValue()。
+
+    private static Integer extractPromptTokensObj(ChatResponse resp) {
+        if (resp == null || resp.getMetadata() == null) return null;
+        Usage u = resp.getMetadata().getUsage();
+        return u == null ? null : u.getPromptTokens();
+    }
+
+    private static Integer extractCompletionTokensObj(ChatResponse resp) {
+        if (resp == null || resp.getMetadata() == null) return null;
+        Usage u = resp.getMetadata().getUsage();
+        return u == null ? null : u.getCompletionTokens();
+    }
+
+    private static long extractPromptTokens(ChatResponse resp) {
+        Integer v = extractPromptTokensObj(resp);
+        return v == null ? 0L : v.longValue();
+    }
+
+    private static long extractCompletionTokens(ChatResponse resp) {
+        Integer v = extractCompletionTokensObj(resp);
+        return v == null ? 0L : v.longValue();
     }
 }

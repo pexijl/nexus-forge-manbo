@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -138,6 +139,27 @@ public class AiProperties {
          * 为null时自动根据模型能力自动推断，手动赋值则以配置为准
          */
         private Boolean supportsTools;
+
+        /**
+         * 该 provider 走哪个 Spring AI 协议家族 — 决定 commit 后续
+         * {@code EnvironmentPostProcessor} 把 {@code spring.ai.providers.<vendor>.*}
+         * 桥接到哪个 starter namespace(openai / anthropic / ollama)。
+         *
+         * <p>未显式设置时,按 vendor key 名推断:
+         * <ul>
+         *   <li>{@code anthropic} → {@link Protocol#ANTHROPIC}</li>
+         *   <li>{@code ollama} → {@link Protocol#OLLAMA}</li>
+         *   <li>其他(openai / deepseek / dashscope / glm / minimax / 中转站 / ...) →
+         *       {@link Protocol#OPENAI}(OpenAI Chat Completions 协议家族共用
+         *       OpenAiChatModel,DeepSeek API 虽曾有独立 starter,本项目已统一
+         *       走 OpenAI starter,见 build.gradle 注释)</li>
+         * </ul>
+         *
+         * <p>绝大多数 vendor 不需要显式设置,默认推断就够。显式覆盖场景:用同一个
+         * vendor key 接非默认协议(例如 {@code providers.openai.protocol=anthropic}
+         * 走 Anthropic Messages 兼容中转)。
+         */
+        private Protocol protocol;
     }
 
     /**
@@ -291,5 +313,68 @@ public class AiProperties {
     @Data
     public static class OpenAiCompatible extends Provider {
         // 现有 OpenAi 的全部字段保留;各国产 / Ollama 都 extend 这个
+    }
+
+    /**
+     * Spring AI ChatModel 协议家族枚举。决定 {@code spring.ai.providers.<vendor>*}
+     * 该桥接到哪个 Spring AI starter 的 namespace(由 commit 后续的
+     * {@code EnvironmentPostProcessor} 消费)。
+     *
+     * <p>当前支持 3 个官方 starter 协议:
+     * <ul>
+     *   <li>{@link #OPENAI} — {@code spring-ai-starter-model-openai} 提供的
+     *       {@code OpenAiChatModel},覆盖 OpenAI / DeepSeek / Ollama / DashScope /
+     *       GLM / 各种 OpenAI 兼容中转(都走 OpenAI Chat Completions 协议)。
+     *       DeepSeek 之前有独立 starter,本项目已统一到 OPENAI 协议(见
+     *       build.gradle + 上面 {@link Provider#protocol} 字段注释)。</li>
+     *   <li>{@link #ANTHROPIC} — {@code spring-ai-starter-model-anthropic} 提供的
+     *       {@code AnthropicChatModel},走 Anthropic Messages 协议(非 OpenAI 兼容)。</li>
+     *   <li>{@link #OLLAMA} — {@code spring-ai-starter-model-ollama} 提供的
+     *       {@code OllamaChatModel},本地推理,Ollama 专属参数。</li>
+     * </ul>
+     */
+    public enum Protocol {
+        OPENAI,
+        ANTHROPIC,
+        OLLAMA
+    }
+
+    /**
+     * 按 vendor key 名推断协议 — {@code Provider.protocol} 显式设置时优先用配置值,
+     * 否则按 key 名走默认映射(见 {@link Provider#protocol} 字段 javadoc)。
+     *
+     * <p>本方法无副作用、不抛异常:未知的 vendor key 一律默认 {@link Protocol#OPENAI}
+     * (OpenAI 协议家族覆盖范围最广,降级到 openai starter 是最安全 fallback —
+     * bridge 写 {@code spring.ai.openai.*} 时若该 vendor 没有 OpenAI ChatModel bean,
+     * Spring AI 启动装配阶段会自然失败并暴露给用户)。
+     *
+     * <p><b>DeepSeek key 默认走 OPENAI</b>:DeepSeek 之前有独立 Spring AI starter
+     * (deepseek-reasoner 等特有字段),本项目已统一移除独立 starter(详见 build.gradle
+     * 注释),DeepSeek 走 OpenAI Chat Completions 协议家族复用 openai starter —
+     * yaml 的 {@code providers.deepseek.*} 由 ProviderPropertiesBridge 桥到
+     * {@code spring.ai.openai.*},ChatModelRouter 通过 aliasing 把 "deepseek" vendor
+     * 路由到 openAiChatModel bean。
+     *
+     * @param vendorKey {@code spring.ai.providers.<vendorKey>.*} 中的 vendor key
+     *                   (e.g. {@code "openai"} / {@code "deepseek"} / {@code "dashscope"}),
+     *                   null/空串时也安全
+     * @return 推断出的协议家族
+     */
+    public Protocol resolveProtocol(String vendorKey) {
+        if (vendorKey != null && !vendorKey.isBlank()) {
+            Provider p = providers.get(vendorKey);
+            if (p != null && p.getProtocol() != null) {
+                return p.getProtocol();
+            }
+        }
+        if (vendorKey == null || vendorKey.isBlank()) {
+            return Protocol.OPENAI;
+        }
+        return switch (vendorKey.toLowerCase(Locale.ROOT)) {
+            case "anthropic" -> Protocol.ANTHROPIC;
+            case "ollama" -> Protocol.OLLAMA;
+            // deepseek 不再独立 starter,走 OPENAI 协议家族复用 openai starter
+            default -> Protocol.OPENAI;
+        };
     }
 }

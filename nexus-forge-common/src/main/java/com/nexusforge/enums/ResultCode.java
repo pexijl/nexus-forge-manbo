@@ -37,6 +37,14 @@ public enum ResultCode {
     AVATAR_UPLOAD_FAILED(2010, "头像上传失败"),
     OLD_PASSWORD_INCORRECT(2011, "旧密码不正确"),
     NEW_PASSWORD_SAME_AS_OLD(2012, "新密码不能与旧密码相同"),
+    RESET_CODE_INVALID(2013, "验证码错误或已过期"),
+    RESET_CODE_TOO_MANY_ATTEMPTS(2014, "验证失败次数过多,请重新获取验证码"),
+    RESET_CODE_SEND_TOO_FREQUENT(2015, "请求过于频繁,请稍后再试"),
+    RESET_CODE_USER_BANNED(2016, "账号已封禁"),
+    FILE_NOT_FOUND(2017, "文件不存在"),
+    FILE_ALREADY_DELETED(2018, "文件已删除"),
+    FILE_FORBIDDEN(2019, "无文件访问权限"),
+    FILE_UPLOAD_CONFLICT(2020, "同账号上传中,请稍后重试"),
 
     // AI 网关
     LLM_CONFIG_MISSING(3001, "LLM 配置缺失"),
@@ -48,7 +56,12 @@ public enum ResultCode {
     LLM_QUOTA_EXCEEDED(3007, "LLM 配额已用尽"),
     LLM_ALL_VENDORS_FAILED(3008, "所有降级链均失败"),
     LLM_CIRCUIT_OPEN(3009, "降级链已熔断,暂不可用"),
-    LLM_GLOBAL_DEFAULT_NOT_CONFIGURED(3010, "全局 AI 模型未配置:管理员必须先调用 /api/admin/ai/global-default");
+    LLM_GLOBAL_DEFAULT_NOT_CONFIGURED(3010, "全局 AI 模型未配置:管理员必须先调用 /api/admin/ai/global-default"),
+    // Phase 1 多模型管理:模型在 catalog 里但 enabled=false(管理员一键关停)
+    LLM_MODEL_DISABLED(3011, "模型已被管理员禁用,请联系管理员或换一个模型"),
+    // Phase 3 用户级 BYOK 多代理
+    LLM_PROXY_NOT_FOUND(3012, "用户 AI 代理不存在或不属于当前用户"),
+    LLM_PROXY_DISABLED(3013, "用户 AI 代理已被禁用,请在 /api/ai/proxies 启用或选别的代理");
 
     private final Integer code;
     private final String message;

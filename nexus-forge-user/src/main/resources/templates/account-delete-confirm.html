@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>确认注销 Nexus Forge 账号</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+               color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px; }
+        .code { font-size: 32px; font-weight: 700; letter-spacing: 4px;
+                color: #dc2626; padding: 16px 24px; background: #fef2f2;
+                border-radius: 8px; display: inline-block; margin: 16px 0; }
+        .meta { color: #6b7280; font-size: 14px; }
+        .warn { color: #b91c1c; font-size: 13px; margin-top: 24px; }
+    </style>
+</head>
+<body>
+<h2>确认注销账号</h2>
+<p>你(或冒充你的人)请求注销这个邮箱对应的账号。验证码如下:</p>
+<div class="code" th:text="${code}">000000</div>
+<p class="meta">
+    验证码 <strong th:text="${ttlMinutes}">5</strong> 分钟内有效,失败 5 次后自动失效。
+</p>
+<p class="warn">
+    <strong>注销是不可逆的:</strong>账号将立即被禁用,所有对话 / 文件 / 资料
+    将被永久删除,用户名和邮箱会被回收。14 天内可通过邮件中的恢复链接撤销注销。
+</p>
+<hr/>
+<p class="meta">如果不是本人操作,请忽略本邮件 —— 你的账号不会被改动。</p>
+</body>
+</html>
